@@ -3,6 +3,7 @@ from discord.ext import commands
 import os
 import threading
 from flask import Flask
+import sqlite3 # <--- Ajouté pour SQLite
 
 # --- 1. LE SERVEUR POUR RAILWAY (Keep Alive) ---
 app = Flask('')
@@ -20,6 +21,29 @@ class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
         super().__init__(command_prefix="!", intents=intents)
+        
+        # --- INITIALISATION SQLITE ---
+        # On crée la connexion à la base de données ici pour qu'elle soit accessible partout
+        self.db = sqlite3.connect("database.db")
+        self.create_tables()
+
+    def create_tables(self):
+        cursor = self.db.cursor()
+        # Création de la table avec TOUTES les colonnes pour tous tes fichiers .py
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                money INTEGER DEFAULT 1000,
+                banque INTEGER DEFAULT 0,
+                last_daily REAL DEFAULT 0,
+                daily_streak INTEGER DEFAULT 0,
+                entreprise_secours INTEGER DEFAULT 0,
+                last_secours_payout REAL DEFAULT 0,
+                last_secours_claim REAL DEFAULT 0
+            )
+        ''')
+        self.db.commit()
+        print("🗄️ Base de données SQLite initialisée avec succès !")
 
     async def setup_hook(self):
         # On charge tes fichiers banque.py, jeux.py, etc.
