@@ -1,0 +1,114 @@
+import discord
+from discord import app_commands
+from discord.ext import commands
+import random
+import asyncio
+
+class Jeux(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    def get_user(self, user_id):
+        """Récupère le solde du joueur dans SQLite"""
+        cursor = self.bot.db.cursor()
+        cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+        self.bot.db.commit()
+        cursor.execute("SELECT money FROM users WHERE user_id = ?", (user_id,))
+        return cursor.fetchone()[0]
+
+    def update_money(self, user_id, amount):
+        """Met à jour le solde (gain ou perte)"""
+        cursor = self.bot.db.cursor()
+        cursor.execute("UPDATE users SET money = money + ? WHERE user_id = ?", (amount, user_id))
+        self.bot.db.commit()
+
+    def fmt(self, n):
+        return f"{n:,}".replace(",", " ")
+
+    group = app_commands.Group(name="jeux", description="🎰 Casino Haute Tension")
+
+    # ==================== MYSTÈRE AMÉLIORÉ (1-14) ====================
+    @group.command(name="mystere", description="🔢 Devine si ton nombre sera plus haut ou plus bas (1-14)")
+    async def mystere(self, interaction: discord.Interaction, pari: int):
+        solde = self.get_user(interaction.user.id)
+        
+        # Vérification des limites
+        if pari < 1: 
+            return await interaction.response.send_message("❌ Mise minimale : `1 €`.", ephemeral=True)
+        if pari > 2500: 
+            return await interaction.response.send_message("❌ Mise maximale : `2 500 €`.", ephemeral=True)
+        if solde < pari:
+            return await interaction.response.send_message(f"❌ Solde insuffisant (`{self.fmt(solde)} €`).", ephemeral=True)
+
+        # Génération des nombres (1 à 14)
+        bc = random.randint(1, 14) # Nombre de la banque
+        uc = random.randint(1, 14) # Nombre du joueur (caché au début)
+
+        embed = discord.Embed(
+            title="🔢 JEU DU MYSTÈRE", 
+            description=f"Le nombre de la banque est : **{bc}**\n\nTon nombre est caché. Sera-t-il plus **Haut** ou plus **Bas** ?", 
+            color=0x3498DB
+        )
+        embed.add_field(name="💰 Mise engagée", value=f"`{self.fmt(pari)} €`", inline=True)
+        embed.add_field(name="📈 Gain potentiel", value=f"`{self.fmt(round(pari*1.5))} €`", inline=True)
+        embed.set_footer(text="Tu as 30 secondes pour décider !")
+
+        class MystereView(discord.ui.View):
+            def __init__(self, cog, bc, uc, pari):
+                super().__init__(timeout=30)
+                self.cog = cog
+                self.bc = bc
+                self.uc = uc
+                self.pari = pari
+                self.message = None
+
+            async def on_timeout(self):
+                for child in self.children:
+                    child.disabled = True
+                if self.message:
+                    await self.message.edit(view=self)
+
+            async def process_choice(self, i: discord.Interaction, choice: str):
+                if i.user.id != interaction.user.id:
+                    return await i.response.send_message("❌ Ce n'est pas ton tour de jouer !", ephemeral=True)
+
+                # Résultat final
+                res_embed = discord.Embed(description=f"Banque : **{self.bc}**\nToi : **{self.uc}**", color=0x3498DB)
+                
+                # Cas d'égalité
+                if self.uc == self.bc:
+                    res_embed.title = "🤝 ÉGALITÉ"
+                    res_embed.color = 0x95A5A6
+                    res_embed.description += "\n\nLes nombres sont identiques. Ta mise est conservée."
+                
+                # Cas de Victoire (Haut ou Bas)
+                elif (choice == "h" and self.uc > self.bc) or (choice == "b" and self.uc < self.bc):
+                    gain = round(self.pari * 1.5)
+                    self.cog.update_money(i.user.id, gain)
+                    res_embed.title = "✅ VICTOIRE !"
+                    res_embed.color = 0x2ECC71
+                    res_embed.description += f"\n\nBravo ! Tu remportes **{self.cog.fmt(gain)} €**."
+                
+                # Cas de Défaite (Crash)
+                else:
+                    perte = self.pari * 2
+                    self.cog.update_money(i.user.id, -perte)
+                    res_embed.title = "💀 CRASH"
+                    res_embed.color = 0xE74C3C
+                    res_embed.description += f"\n\nMauvais pronostic ! Tu perds **{self.cog.fmt(perte)} €** (Mise x2)."
+
+                await i.response.edit_message(embed=res_embed, view=None)
+
+            @discord.ui.button(label="PLUS HAUT", emoji="⏫", style=discord.ButtonStyle.success)
+            async def plus_haut(self, i, b):
+                await self.process_choice(i, "h")
+
+            @discord.ui.button(label="PLUS BAS", emoji="⏬", style=discord.ButtonStyle.danger)
+            async def plus_bas(self, i, b):
+                await self.process_choice(i, "b")
+
+        view = MystereView(self, bc, uc, pari)
+        await interaction.response.send_message(embed=embed, view=view)
+        view.message = await interaction.original_response()
+
+  
