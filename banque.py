@@ -8,9 +8,9 @@ class Banque(commands.Cog):
         self.bot = bot
 
     def get_user_data(self, user_id):
-        """Récupère toutes les colonnes d'un utilisateur depuis SQLite"""
+        """Récupère les données depuis SQLite avec sécurité"""
         cursor = self.bot.db.cursor()
-        # On s'assure que l'utilisateur existe avec les nouvelles colonnes
+        # Correction ici : on s'assure d'insérer TOUTES les colonnes nécessaires pour éviter les erreurs
         cursor.execute('''
             INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) 
             VALUES (?, ?, ?, ?, ?)
@@ -27,7 +27,7 @@ class Banque(commands.Cog):
         }
 
     def update_user_data(self, user_id, portefeuille, banque, last_daily=None, daily_streak=None):
-        """Met à jour les données dans SQLite"""
+        """Met à jour les données de manière propre"""
         cursor = self.bot.db.cursor()
         if last_daily is not None and daily_streak is not None:
             cursor.execute('''
@@ -41,11 +41,11 @@ class Banque(commands.Cog):
         self.bot.db.commit()
 
     def fmt(self, n):
+        """Formatage des nombres : 1 000 000 €"""
         return f"{n:,}".replace(",", " ")
 
     group = app_commands.Group(name="banque", description="🏦 Gestion bancaire principale")
 
-    # ─── ARGENT ────────────────────────────────────────────────────────────────
     @group.command(name="argent", description="💰 Gérer votre portefeuille et votre banque")
     async def argent(self, interaction: discord.Interaction):
         u = self.get_user_data(interaction.user.id)
@@ -60,13 +60,15 @@ class Banque(commands.Cog):
             e.add_field(name="💵 Portefeuille", value=f"```\n{self.fmt(user_stats['portefeuille'])} €\n```", inline=True)
             e.add_field(name="🏛️ Banque", value=f"```\n{self.fmt(user_stats['banque'])} €\n```", inline=True)
             e.add_field(name="\u200b", value="\u200b", inline=True)
+            
             bar_wallet = "█" * (pct_wallet // 10) + "░" * (10 - pct_wallet // 10)
             bar_banque = "█" * (pct_banque // 10) + "░" * (10 - pct_banque // 10)
             e.add_field(name="📊 Répartition", value=f"💵 `{bar_wallet}` {pct_wallet}%\n🏛️ `{bar_banque}` {pct_banque}%", inline=False)
             e.add_field(name="💳 Patrimoine total", value=f"**`{self.fmt(total)} €`**", inline=False)
-            e.set_footer(text="Utilisez les boutons pour gérer votre argent")
+            e.set_footer(text="Gérez votre argent via les boutons")
             return e
 
+        # --- MODAL POUR LES SAISIES ---
         class MontantModal(discord.ui.Modal):
             def __init__(self, title, label, cog, owner_id, action):
                 super().__init__(title=title)
@@ -97,8 +99,8 @@ class Banque(commands.Cog):
 
                 self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
                 await i.response.edit_message(embed=create_embed(u, i.user))
-                await i.followup.send("✅ Transaction effectuée !", ephemeral=True)
 
+        # --- VIEW POUR LES BOUTONS ---
         class BankView(discord.ui.View):
             def __init__(self, cog, owner_id):
                 super().__init__(timeout=120)
@@ -131,11 +133,11 @@ class Banque(commands.Cog):
 
         await interaction.response.send_message(embed=create_embed(u, interaction.user), view=BankView(self, interaction.user.id))
 
-    # ─── JOURNALIER ────────────────────────────────────────────────────────────
-    @group.command(name="journalier", description="🎁 Récupère tes 500 € gratuits toutes les heures")
+    @group.command(name="journalier", description="🎁 Récupère tes 500 € gratuits")
     async def journalier(self, interaction: discord.Interaction):
         u = self.get_user_data(interaction.user.id)
         now = time.time()
+        
         if now - u["last_daily"] < 3600:
             rem = 3600 - (now - u["last_daily"])
             return await interaction.response.send_message(f"⏱️ Reviens dans {int(rem//60)}m {int(rem%60)}s !", ephemeral=True)
@@ -145,9 +147,8 @@ class Banque(commands.Cog):
         u["portefeuille"] += gain
         
         self.update_user_data(interaction.user.id, u["portefeuille"], u["banque"], now, streak)
-        await interaction.response.send_message(f"🎁 **+{self.fmt(gain)} €** (Streak x{streak}) ! Nouveau solde: {self.fmt(u['portefeuille'])} €")
+        await interaction.response.send_message(f"🎁 **+{self.fmt(gain)} €** (Streak x{streak}) ! Portefeuille: {self.fmt(u['portefeuille'])} €")
 
-    # ─── CLASSEMENT ────────────────────────────────────────────────────────────
     @group.command(name="classement", description="🏆 Top 10 des membres les plus riches")
     async def classement(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -157,15 +158,16 @@ class Banque(commands.Cog):
         
         e = discord.Embed(title="🏆 Classement des Fortunes", color=0xF1C40F)
         lines = []
-        for i, row in enumerate(rows):
-            member = interaction.guild.get_member(row[0]) or await self.bot.fetch_user(row[0])
-            name = member.display_name if member else f"Joueur {row[0]}"
-            lines.append(f"{['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟'][i]} **{name}**\n　　💰 `{self.fmt(row[1])} €` (💵 `{self.fmt(row[2])}` 🏛️ `{self.fmt(row[3])}`)")
+        emojis = ['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟']
         
-        e.description = "\n\n".join(lines)
+        for i, row in enumerate(rows):
+            member = interaction.guild.get_member(row[0])
+            name = member.display_name if member else f"Joueur {row[0]}"
+            lines.append(f"{emojis[i]} **{name}**\n　💰 `{self.fmt(row[1])} €` (💵 `{self.fmt(row[2])}` 🏛️ `{self.fmt(row[3])}`)")
+        
+        e.description = "\n\n".join(lines) if lines else "Aucune donnée disponible."
         await interaction.followup.send(embed=e)
 
-    # ─── VOIR ──────────────────────────────────────────────────────────────────
     @group.command(name="voir", description="🔍 Consulter les finances d'un membre")
     async def voir(self, interaction: discord.Interaction, membre: discord.Member):
         u = self.get_user_data(membre.id)
@@ -174,11 +176,11 @@ class Banque(commands.Cog):
         e = discord.Embed(title=f"🔍 Profil de {membre.display_name}", color=0x5865F2)
         e.add_field(name="💵 Portefeuille", value=f"```\n{self.fmt(u['portefeuille'])} €\n```", inline=True)
         e.add_field(name="🏛️ Banque", value=f"```\n{self.fmt(u['banque'])} €\n```", inline=True)
-        e.add_field(name="💳 Total", value=f"```\n{self.fmt(total)} €\n```", inline=True)
+        e.add_field(name="💳 Total", value=f"```\n{self.fmt(total)} €\n```", inline=False)
         e.set_thumbnail(url=membre.display_avatar.url)
         await interaction.response.send_message(embed=e)
 
-    @group.command(name="payer", description="💸 Donner de l'argent à un membre")
+    @group.command(name="payer", description="💸 Donner de l'argent")
     async def payer(self, interaction: discord.Interaction, membre: discord.Member, montant: int):
         if membre.id == interaction.user.id or montant <= 0:
             return await interaction.response.send_message("Action invalide.", ephemeral=True)
@@ -187,7 +189,7 @@ class Banque(commands.Cog):
         receveur = self.get_user_data(membre.id)
 
         if donneur["portefeuille"] < montant:
-            return await interaction.response.send_message("Pas assez d'argent !", ephemeral=True)
+            return await interaction.response.send_message("Pas assez d'argent en poche !", ephemeral=True)
 
         donneur["portefeuille"] -= montant
         receveur["portefeuille"] += montant
