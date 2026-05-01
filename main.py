@@ -3,33 +3,37 @@ from discord.ext import commands
 import os
 import threading
 from flask import Flask
-import sqlite3 # <--- Ajouté pour SQLite
+import sqlite3
+import logging
 
-# --- 1. LE SERVEUR POUR RAILWAY (Keep Alive) ---
+# --- 1. CONFIGURATION DES LOGS (Pour voir les erreurs sur Railway) ---
+logging.basicConfig(level=logging.INFO)
+
+# --- 2. LE SERVEUR POUR RAILWAY (Keep Alive) ---
 app = Flask('')
 @app.route('/')
 def home(): 
     return "✅ Bot Casino Opérationnel sur Railway !"
 
 def run_web():
-    # Railway utilise la variable d'environnement PORT
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- 2. LE CŒUR DU BOT ---
+# --- 3. LE CŒUR DU BOT ---
 class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.all()
         super().__init__(command_prefix="!", intents=intents)
         
-        # --- INITIALISATION SQLITE ---
-        # On crée la connexion à la base de données ici pour qu'elle soit accessible partout
-        self.db = sqlite3.connect("database.db")
+        # Chemin de la base de données (Prêt pour les volumes Railway)
+        # Si tu crées un volume /data sur Railway, utilise : "data/database.db"
+        self.db_path = "database.db" 
+        self.db = sqlite3.connect(self.db_path, check_same_thread=False)
         self.create_tables()
 
     def create_tables(self):
         cursor = self.db.cursor()
-        # Création de la table avec TOUTES les colonnes pour tous tes fichiers .py
+        # On regroupe tout ici : argent, banque, daily et secours
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -43,10 +47,10 @@ class MyBot(commands.Bot):
             )
         ''')
         self.db.commit()
-        print("🗄️ Base de données SQLite initialisée avec succès !")
+        print("🗄️ Base de données SQLite prête !")
 
     async def setup_hook(self):
-        # On charge tes fichiers banque.py, jeux.py, etc.
+        # Liste de tes fichiers .py
         extensions = ['banque', 'jeux', 'autre', 'boutique', 'admin', 'autres2']
         
         for ext in extensions:
@@ -54,22 +58,40 @@ class MyBot(commands.Bot):
                 await self.load_extension(ext)
                 print(f"✅ Extension chargée : {ext}")
             except Exception as e:
-                print(f"❌ Impossible de charger {ext} : {e}")
+                print(f"❌ Erreur sur {ext} : {e}")
         
         await self.tree.sync()
-        print("✨ Commandes slash synchronisées !")
+        print("✨ Slash Commands synchronisées !")
 
-# --- 3. LANCEMENT ---
+    async def on_ready(self):
+        print(f"---")
+        print(f"🤖 Connecté en tant que : {self.user.name}")
+        print(f"🆔 ID : {self.user.id}")
+        print(f"🟢 Le bot est prêt à encaisser les mises !")
+        print(f"---")
+        # Petit statut stylé
+        await self.change_presence(activity=discord.Game(name="Plumer le casino 🎰"))
+
+# --- 4. LANCEMENT ---
 bot = MyBot()
 
+# Gestion propre de la fermeture
+@bot.event
+async def on_close():
+    bot.db.close()
+    print("🔌 Connexion SQLite fermée.")
+
 if __name__ == "__main__":
-    # Lancement du serveur web pour éviter que Railway ne coupe le bot
+    # Lancement du serveur Flask en thread séparé
     threading.Thread(target=run_web, daemon=True).start()
     
-    # Récupération du Token
+    # Récupération du Token (Variable d'environnement sur Railway)
     token = os.environ.get('TOKEN')
     
     if token:
-        bot.run(token)
+        try:
+            bot.run(token)
+        except Exception as e:
+            print(f"💥 Erreur fatale au lancement : {e}")
     else:
-        print("❌ ERREUR : Aucun TOKEN trouvé dans les variables d'environnement !")
+        print("❌ ERREUR : Le TOKEN est introuvable dans les variables Railway !")
