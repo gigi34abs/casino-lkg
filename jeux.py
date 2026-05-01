@@ -186,3 +186,71 @@ class Jeux(commands.Cog):
         v = PortesView(self, win_door, pari)
         await interaction.response.send_message(embed=embed, view=v)
         v.message = await interaction.original_response()
+
+# ==================== PILE OU FACE (Version SQLite) ====================
+    @group.command(name="pileouface", description="🪙 Tente le 50/50 (Max 7,500€)")
+    async def pf(self, interaction: discord.Interaction, pari: int):
+        solde = self.get_user(interaction.user.id)
+        
+        # Vérification de la mise
+        err = self.check_mise(pari, 1, 7500, solde)
+        if err: return await interaction.response.send_message(err, ephemeral=True)
+
+        embed = discord.Embed(
+            title="🪙 PILE OU FACE", 
+            description="La pièce est lancée dans les airs... Fais ton choix !", 
+            color=0xF39C12
+        )
+        embed.add_field(name="💰 Mise engagée", value=f"`{self.fmt(pari)} €`", inline=True)
+        embed.add_field(name="✨ Gain potentiel", value=f"`{self.fmt(round(pari*1.75))} €`", inline=True)
+
+        class PFView(discord.ui.View):
+            def __init__(self, cog, pari):
+                super().__init__(timeout=30)
+                self.cog = cog
+                self.pari = pari
+                self.message = None
+
+            async def on_timeout(self):
+                for child in self.children:
+                    child.disabled = True
+                if self.message:
+                    try: await self.message.edit(view=self)
+                    except: pass
+
+            async def play(self, i: discord.Interaction, choix: str):
+                if i.user.id != interaction.user.id:
+                    return await i.response.send_message("❌ Ce n'est pas ton jeu !", ephemeral=True)
+
+                resultat = random.choice(["pile", "face"])
+                emoji_resultat = "🟡" if resultat == "pile" else "⚪"
+                
+                res_embed = discord.Embed(
+                    title="🪙 RÉSULTAT", 
+                    description=f"La pièce s'arrête sur... {emoji_resultat} **{resultat.upper()}**", 
+                    color=0xF39C12
+                )
+
+                if choix == resultat:
+                    gain = round(self.pari * 1.75)
+                    self.cog.update_money(i.user.id, gain)
+                    res_embed.title = "💰 GAGNÉ !"
+                    res_embed.color = 0x2ECC71
+                    res_embed.add_field(name="Résultat", value=f"Bien vu ! Tu remportes **{self.cog.fmt(gain)} €**")
+                else:
+                    self.cog.update_money(i.user.id, -self.pari)
+                    res_embed.title = "❌ PERDU"
+                    res_embed.color = 0xE74C3C
+                    res_embed.add_field(name="Résultat", value=f"Pas de chance cette fois. Tu perds **{self.cog.fmt(self.pari)} €**")
+
+                await i.response.edit_message(embed=res_embed, view=None)
+
+            @discord.ui.button(label="PILE", emoji="🟡", style=discord.ButtonStyle.primary)
+            async def pile(self, i, b): await self.play(i, "pile")
+
+            @discord.ui.button(label="FACE", emoji="⚪", style=discord.ButtonStyle.secondary)
+            async def face(self, i, b): await self.play(i, "face")
+
+        v = PFView(self, pari)
+        await interaction.response.send_message(embed=embed, view=v)
+        v.message = await interaction.original_response()
