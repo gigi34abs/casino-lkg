@@ -126,6 +126,78 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=PortesView(self, win_door, pari))
 
+    # ==================== COURSE HIPPIQUE (2-6 JOUEURS) ====================
+    @group.command(name="course", description="🏇 Course multijoueur (2-6 pers) : Le gagnant rafle toute la mise !")
+    async def course(self, interaction: discord.Interaction, mise: int):
+        solde_host = self.get_user(interaction.user.id)
+        if mise < 50: return await interaction.response.send_message("❌ La mise minimale est de 50 €.", ephemeral=True)
+        if solde_host < mise: return await interaction.response.send_message("❌ Tu n'as pas assez d'argent.", ephemeral=True)
+
+        embed = discord.Embed(
+            title="🏇 GRANDE COURSE HIPPIQUE",
+            description=f"**{interaction.user.display_name}** organise une course !\n💰 Mise par personne : **{self.fmt(mise)} €**\n\nCliquez sur le bouton pour participer (Maximum 6).",
+            color=0x27ae60
+        )
+
+        class CourseView(discord.ui.View):
+            def __init__(self, cog, host, mise):
+                super().__init__(timeout=60)
+                self.cog = cog
+                self.participants = [host]
+                self.mise = mise
+                self.started = False
+
+            @discord.ui.button(label="Participer", emoji="🏇", style=discord.ButtonStyle.green)
+            async def join(self, i: discord.Interaction, b: discord.ui.Button):
+                if self.started: return await i.response.send_message("❌ Trop tard, la course a commencé !", ephemeral=True)
+                if i.user.id in [p.id for p in self.participants]: return await i.response.send_message("❌ Tu es déjà inscrit !", ephemeral=True)
+                if len(self.participants) >= 6: return await i.response.send_message("❌ La course est complète (6/6) !", ephemeral=True)
+                
+                s = self.cog.get_user(i.user.id)
+                if s < self.mise: return await i.response.send_message("❌ Pas assez d'argent !", ephemeral=True)
+
+                self.participants.append(i.user)
+                n = len(self.participants)
+                emb = i.message.embeds[0]
+                emb.description = f"**Organisateur :** {self.participants[0].display_name}\n💰 Mise : **{self.cog.fmt(self.mise)} €**\n\n**Inscrits ({n}/6) :**\n" + "\n".join([f"• {p.display_name}" for p in self.participants])
+                await i.response.edit_message(embed=emb, view=self)
+
+            @discord.ui.button(label="Lancer la course !", emoji="🚩", style=discord.ButtonStyle.blurple)
+            async def start(self, i: discord.Interaction, b: discord.ui.Button):
+                if i.user.id != self.participants[0].id: return await i.response.send_message("❌ Seul l'organisateur peut lancer.", ephemeral=True)
+                if len(self.participants) < 2: return await i.response.send_message("❌ Il faut au moins 2 joueurs !", ephemeral=True)
+                
+                self.started = True
+                self.clear_items()
+                await i.response.edit_message(content="🚦 **PRÊTS ? PARTEZ !**", view=self)
+
+                # Prélèvement des mises
+                for p in self.participants:
+                    self.cog.update_money(p.id, -self.mise)
+
+                # Animation rapide
+                pistes = {p.display_name: 0 for p in self.participants}
+                for _ in range(3):
+                    await asyncio.sleep(1.5)
+                    for p in pistes: pistes[p] += random.randint(1, 5)
+                    progression = "\n".join([f"🏇 | {'➖' * pistes[p]} {p}" for p in pistes])
+                    await i.edit_original_response(content=f"🏁 **LA COURSE EST EN COURS !**\n\n{progression}")
+
+                # Résultat
+                gagnant = random.choice(self.participants)
+                cagnotte = self.mise * len(self.participants)
+                self.cog.update_money(gagnant.id, cagnotte)
+
+                res = discord.Embed(
+                    title="🏆 RÉSULTAT DE LA COURSE",
+                    description=f"Le cheval de **{gagnant.mention}** franchit la ligne en premier !\n\n💰 Il rafle toute la mise : **{self.cog.fmt(cagnotte)} €** !",
+                    color=0xF1C40F
+                )
+                await i.edit_original_response(content=None, embed=res)
+
+        view = CourseView(self, interaction.user, mise)
+        await interaction.response.send_message(embed=embed, view=view)
+
 # ==================== PFC DUEL (Version SQLite) ====================
     @group.command(name="pfc", description="⚔️ Duel Pierre-Feuille-Ciseaux contre un autre joueur")
     async def pfc(self, interaction: discord.Interaction, adversaire: discord.Member, mise: int):
