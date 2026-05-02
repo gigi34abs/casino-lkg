@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands # Ajout nécessaire pour les erreurs de rôle
 import os
 import threading
 from flask import Flask
@@ -25,11 +26,7 @@ class MyBot(commands.Bot):
         intents = discord.Intents.all()
         super().__init__(command_prefix="!", intents=intents)
         
-        # --- CONFIGURATION SQLITE POUR RAILWAY ---
-        # On utilise le dossier /data lié au Volume Railway
         self.db_path = "data/database.db" 
-        
-        # Vérification si le dossier existe (évite les crashs au premier lancement)
         if not os.path.exists("data"):
             os.makedirs("data")
             
@@ -52,6 +49,32 @@ class MyBot(commands.Bot):
         ''')
         self.db.commit()
         print("🗄️ Base de données SQLite prête dans /data !")
+
+    # ==================== DOUBLE SÉCURITÉ GLOBALE ====================
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        ALLOWED_CATEGORY_ID = 1498394439079559318
+        ALLOWED_ROLE_ID = 1499809955841310871
+
+        # 1. Vérification du Rôle
+        role = interaction.user.get_role(ALLOWED_ROLE_ID)
+        if not role:
+            await interaction.response.send_message(
+                "🚫 **Accès refusé** : Tu n'as pas le rôle VIP requis pour utiliser le casino.", 
+                ephemeral=True
+            )
+            return False
+
+        # 2. Vérification de la Catégorie
+        if interaction.channel and hasattr(interaction.channel, 'category_id'):
+            if interaction.channel.category_id != ALLOWED_CATEGORY_ID:
+                await interaction.response.send_message(
+                    f"🎰 **Mauvais endroit** : Les jeux sont réservés aux salons de la catégorie <#{ALLOWED_CATEGORY_ID}>.", 
+                    ephemeral=True
+                )
+                return False
+        
+        return True # Si tout est OK
+    # ================================================================
 
     async def setup_hook(self):
         extensions = ['banque', 'jeux', 'autre', 'boutique', 'admin', 'autres2']
