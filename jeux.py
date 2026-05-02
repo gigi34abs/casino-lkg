@@ -208,6 +208,80 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=PFCInvite(self, interaction.user, adversaire, mise))
 
+    # ==================== ROUE DE LA FORTUNE ====================
+    @group.command(name="roue", description="🎡 Tourne la roue pour multiplier ta mise !")
+    async def roue(self, interaction: discord.Interaction, pari: int):
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(pari, 5, 2000, solde)
+        if err: return await interaction.response.send_message(err, ephemeral=True)
+
+        await interaction.response.send_message("🎡 La roue tourne...")
+        await asyncio.sleep(2)
+
+        outcomes = [0, 0, 0.5, 1.5, 2, 5] # 0 = Perdu, 0.5 = Moitié rendu, etc.
+        mult = random.choice(outcomes)
+        
+        if mult > 1:
+            gain = round(pari * mult)
+            self.update_money(interaction.user.id, gain)
+            msg = f"✨ INCROYABLE ! La roue s'arrête sur **x{mult}**. Tu gagnes **{self.fmt(gain)} €** !"
+        elif mult == 0:
+            self.update_money(interaction.user.id, -pari)
+            msg = f"💀 Aïe... La roue s'arrête sur **0**. Tu perds ta mise de **{self.fmt(pari)} €**."
+        else:
+            perte = round(pari * (1 - mult))
+            self.update_money(interaction.user.id, -perte)
+            msg = f"⚖️ Moyen... La roue s'arrête sur **x{mult}**. Tu récupères seulement la moitié."
+
+        await interaction.edit_original_response(content=msg)
+
+    # ==================== BLACKJACK (21) ====================
+    @group.command(name="blackjack", description="🃏 Tente de te rapprocher de 21 sans dépasser !")
+    async def blackjack(self, interaction: discord.Interaction, pari: int):
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(pari, 10, 5000, solde)
+        if err: return await interaction.response.send_message(err, ephemeral=True)
+
+        player_cards = [random.randint(1, 11), random.randint(1, 11)]
+        dealer_cards = [random.randint(1, 11)]
+
+        embed = discord.Embed(title="🃏 BLACKJACK", color=0x2C3E50)
+        embed.add_field(name="Tes cartes", value=f"{player_cards} (Total: **{sum(player_cards)}**)", inline=False)
+        embed.add_field(name="Banque", value=f"{dealer_cards} + ❓", inline=False)
+
+        class BJView(discord.ui.View):
+            def __init__(self, cog, p_cards, d_cards, mise):
+                super().__init__(timeout=30)
+                self.cog, self.p, self.d, self.m = cog, p_cards, d_cards, mise
+
+            @discord.ui.button(label="Tirer", style=discord.ButtonStyle.green)
+            async def hit(self, i, b):
+                self.p.append(random.randint(1, 11))
+                total = sum(self.p)
+                if total > 21:
+                    self.cog.update_money(i.user.id, -self.m)
+                    await i.response.edit_message(content=f"💥 **BUST !** Tu as dépassé 21 ({total}). Perdu : -{self.cog.fmt(self.m)} €", embed=None, view=None)
+                else:
+                    new_embed = discord.Embed(title="🃏 BLACKJACK", description=f"Total actuel : **{total}**", color=0x2C3E50)
+                    await i.response.edit_message(embed=new_embed)
+
+            @discord.ui.button(label="Rester", style=discord.ButtonStyle.red)
+            async def stay(self, i, b):
+                while sum(self.d) < 17: self.d.append(random.randint(1, 11))
+                pt, dt = sum(self.p), sum(self.d)
+                if dt > 21 or pt > dt:
+                    gain = self.m
+                    self.cog.update_money(i.user.id, gain)
+                    msg = f"✅ GAGNÉ ! La banque a {dt}. Tu gagnes **{self.cog.fmt(gain)} €**"
+                elif pt == dt:
+                    msg = "🤝 ÉGALITÉ ! Mise rendue."
+                else:
+                    self.cog.update_money(i.user.id, -self.m)
+                    msg = f"❌ PERDU ! La banque a {dt}. Perte : -{self.cog.fmt(self.m)} €"
+                await i.response.edit_message(content=msg, embed=None, view=None)
+
+        await interaction.response.send_message(embed=embed, view=BJView(self, player_cards, dealer_cards, pari))
+
 # ==================== PILE OU FACE (Version SQLite) ====================
     @group.command(name="pileouface", description="🪙 Tente le 50/50 (Max 7,500€)")
     async def pf(self, interaction: discord.Interaction, pari: int):
