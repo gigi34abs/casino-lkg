@@ -10,11 +10,13 @@ class Autre(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.timezone = pytz.timezone("Europe/Paris")
-        # ID du rôle VIP autorisé
-        self.id_role_vip = 1499809955841310871
         # ID du salon giveaway
         self.giveaway_channel_id = 1498394479319716040 
         self.auto_giveaway.start()
+
+        # ID de sécurité (récupérés depuis tes instructions)
+        self.ID_ROLE_VIP = 1499809955841310871
+        self.ID_CATEGORIE_CASINO = 1498394439079559318
 
     def cog_unload(self):
         self.auto_giveaway.cancel()
@@ -56,6 +58,7 @@ class Autre(commands.Cog):
             
             if users:
                 gagnant = random.choice(users)
+                # Sauvegarde SQLite
                 self.ensure_user(gagnant.id)
                 cursor = self.bot.db.cursor()
                 cursor.execute("UPDATE users SET money = money + ? WHERE user_id = ?", (montant, gagnant.id))
@@ -67,27 +70,27 @@ class Autre(commands.Cog):
         except Exception as e:
             print(f"Erreur giveaway: {e}")
 
-    # --- COMMANDE VOLER ---
+    # --- COMMANDE VOLER (SÉCURISÉE) ---
     @app_commands.command(name="voler", description="Tenter de braquer un joueur (50/50)")
+    @app_commands.checks.has_role(1499809955841310871) # Vérifie le rôle VIP
     async def voler(self, interaction: discord.Interaction, cible: discord.Member, montant: int):
-        # 1. Vérification du rôle VIP
-        has_vip = any(role.id == self.id_role_vip for role in interaction.user.roles)
-        # Note : On laisse aussi passer les admins (déjà géré par le main, mais plus sûr ici aussi)
-        is_admin = interaction.user.id in [1495018019674390678, 1433802915205742612, 1342146881446350929]
-
-        if not has_vip and not is_admin:
-            return await interaction.response.send_message("🚫 Cette commande est réservée aux membres VIP !", ephemeral=True)
+        # Vérification supplémentaire de la catégorie (sécurité double)
+        current_cat = getattr(interaction.channel, 'category_id', None)
+        if current_cat != self.ID_CATEGORIE_CASINO:
+            return await interaction.response.send_message(f"🎰 Les vols sont uniquement autorisés dans la catégorie <#{self.ID_CATEGORIE_CASINO}> !", ephemeral=True)
 
         if montant <= 0:
             return await interaction.response.send_message("❌ Mise invalide.", ephemeral=True)
         if cible == interaction.user:
             return await interaction.response.send_message("❌ Tu ne peux pas te voler toi-même.", ephemeral=True)
         
+        # Initialisation des comptes
         self.ensure_user(interaction.user.id)
         self.ensure_user(cible.id)
         
         cursor = self.bot.db.cursor()
         
+        # Vérification du solde de la victime
         cursor.execute("SELECT money FROM users WHERE user_id = ?", (cible.id,))
         money_victime = cursor.fetchone()[0]
         
@@ -95,11 +98,13 @@ class Autre(commands.Cog):
             return await interaction.response.send_message(f"❌ {cible.display_name} n'a pas assez de cash sur lui.", ephemeral=True)
 
         if random.choice([True, False]):
+            # Réussite
             cursor.execute("UPDATE users SET money = money + ? WHERE user_id = ?", (montant, interaction.user.id))
             cursor.execute("UPDATE users SET money = money - ? WHERE user_id = ?", (montant, cible.id))
             embed = discord.Embed(title="✅ BRAQUAGE RÉUSSI", color=0x2ecc71)
             embed.description = f"Tu as dérobé `{montant:,} €` à {cible.mention} !".replace(',', ' ')
         else:
+            # Échec
             cursor.execute("UPDATE users SET money = money - ? WHERE user_id = ?", (montant, interaction.user.id))
             embed = discord.Embed(title="🚨 ALERTE POLICE", color=0xe74c3c)
             embed.description = f"Le braquage a échoué ! Tu perds `{montant:,} €` en frais d'avocat.".replace(',', ' ')
