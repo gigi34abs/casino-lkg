@@ -6,14 +6,29 @@ import time
 class Banque(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Configuration des IDs
+        # IDs de configuration (Vérifie bien que ces IDs sont les bons)
         self.ID_ROLE_VIP = 1499809955841310871
         self.ID_CATEGORIE_CASINO = 1498394439079559318
 
+    # --- LA BARRIÈRE DE SÉCURITÉ (S'applique à TOUT le fichier) ---
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # 1. Vérification du rôle VIP
+        user_role_ids = [role.id for role in interaction.user.roles]
+        if self.ID_ROLE_VIP not in user_role_ids:
+            await interaction.response.send_message("🚫 **Accès refusé** : Tu dois avoir le rôle VIP pour utiliser les commandes Casino.", ephemeral=True)
+            return False # Bloque l'exécution
+
+        # 2. Vérification de la catégorie
+        current_cat = getattr(interaction.channel, 'category_id', None)
+        if current_cat != self.ID_CATEGORIE_CASINO:
+            await interaction.response.send_message(f"🎰 **Mauvais salon** : Les commandes ne sont autorisées que dans la catégorie <#{self.ID_CATEGORIE_CASINO}>.", ephemeral=True)
+            return False # Bloque l'exécution
+
+        return True # Autorise l'exécution si les deux conditions sont remplies
+
+    # --- TES FONCTIONS DE DONNÉES ---
     def get_user_data(self, user_id):
-        """Récupère les données depuis SQLite avec sécurité"""
         cursor = self.bot.db.cursor()
-        # On s'assure que l'utilisateur commence avec 100€
         cursor.execute('''
             INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) 
             VALUES (?, ?, ?, ?, ?)
@@ -30,7 +45,6 @@ class Banque(commands.Cog):
         }
 
     def update_user_data(self, user_id, portefeuille, banque, last_daily=None, daily_streak=None):
-        """Met à jour les données de manière propre"""
         cursor = self.bot.db.cursor()
         if last_daily is not None and daily_streak is not None:
             cursor.execute('''
@@ -44,10 +58,7 @@ class Banque(commands.Cog):
         self.bot.db.commit()
 
     def fmt(self, n):
-        """Formatage des nombres : 1 000 000 €"""
         return f"{n:,}".replace(",", " ")
-
-    # Tu peux maintenant coller tes commandes (argent, voir, etc.) juste en dessous
 
     group = app_commands.Group(name="banque", description="🏦 Gestion bancaire principale")
 
