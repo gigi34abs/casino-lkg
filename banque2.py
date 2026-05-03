@@ -2,66 +2,61 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import time
-import asyncio
-import random
 
 class Banque2(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Plus besoin de db_file car on utilise self.bot.db du main.py
+        # Configuration des IDs
+        self.ID_ROLE_VIP = 1499809955841310871
+        self.ID_CATEGORIE_CASINO = 1498394439079559318
 
-    def get_user(self, user_id):
-        """Récupère l'utilisateur en base SQLite et gère le revenu passif"""
+    # --- LA BARRIÈRE DE SÉCURITÉ ---
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user_role_ids = [role.id for role in interaction.user.roles]
+        if self.ID_ROLE_VIP not in user_role_ids:
+            await interaction.response.send_message("🚫 **Accès refusé** : Tu dois avoir le rôle VIP pour utiliser les commandes Casino.", ephemeral=True)
+            return False
+
+        current_cat = getattr(interaction.channel, 'category_id', None)
+        if current_cat != self.ID_CATEGORIE_CASINO:
+            await interaction.response.send_message(f"🎰 **Mauvais salon** : Les commandes ne sont autorisées que dans la catégorie <#{self.ID_CATEGORIE_CASINO}>.", ephemeral=True)
+            return False
+
+        return True
+
+    # --- TES FONCTIONS DE DONNÉES ---
+    def get_user_data(self, user_id):
         cursor = self.bot.db.cursor()
-        
-        # S'assurer que les colonnes secours existent dans ta table SQLite (voir mon message plus bas)
         cursor.execute('''
-            INSERT OR IGNORE INTO users (user_id, money, banque, entreprise_secours, last_secours_payout, last_secours_claim) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, 100, 0, 0, 0, 0))
+            INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) 
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, 100, 0, 0, 0))
         self.bot.db.commit()
-
-        cursor.execute("SELECT money, banque, entreprise_secours, last_secours_payout, last_secours_claim FROM users WHERE user_id = ?", (user_id,))
-        row = cursor.fetchone()
         
-        u = {
+        cursor.execute("SELECT money, banque, last_daily, daily_streak FROM users WHERE user_id = ?", (user_id,))
+        row = cursor.fetchone()
+        return {
             "portefeuille": row[0],
             "banque": row[1],
-            "entreprise_secours": row[2],
-            "last_secours_payout": row[3],
-            "last_secours_claim": row[4]
+            "last_daily": row[2],
+            "daily_streak": row[3]
         }
 
-        # --- LOGIQUE DE REVENU PASSIF (Toutes les 30 min) ---
-        valeur_ent = u["entreprise_secours"]
-        if valeur_ent > 0:
-            maintenant = time.time()
-            derniere_paie = u["last_secours_payout"]
-            if derniere_paie == 0: derniere_paie = maintenant
-            
-            nb_paies = int((maintenant - derniere_paie) // 1800)
-            if nb_paies > 0:
-                gain_total = nb_paies * valeur_ent
-                u["portefeuille"] += gain_total
-                u["last_secours_payout"] = derniere_paie + (nb_paies * 1800)
-                
-                # On sauvegarde immédiatement ce gain passif
-                cursor.execute("UPDATE users SET money = ?, last_secours_payout = ? WHERE user_id = ?", 
-                               (u["portefeuille"], u["last_secours_payout"], user_id))
-                self.bot.db.commit()
-        
-        return u
-
-    def save_user(self, user_id, u):
-        """Sauvegarde les données dans SQLite"""
+    def update_user_data(self, user_id, portefeuille, banque, last_daily=None, daily_streak=None):
         cursor = self.bot.db.cursor()
-        cursor.execute('''
-            UPDATE users SET money = ?, banque = ?, entreprise_secours = ?, 
-            last_secours_payout = ?, last_secours_claim = ? 
-            WHERE user_id = ?
-        ''', (u["portefeuille"], u["banque"], u["entreprise_secours"], 
-              u["last_secours_payout"], u["last_secours_claim"], user_id))
+        if last_daily is not None and daily_streak is not None:
+            cursor.execute('''
+                UPDATE users SET money = ?, banque = ?, last_daily = ?, daily_streak = ? 
+                WHERE user_id = ?
+            ''', (portefeuille, banque, last_daily, daily_streak, user_id))
+        else:
+            cursor.execute('''
+                UPDATE users SET money = ?, banque = ? WHERE user_id = ?
+            ''', (portefeuille, banque, user_id))
         self.bot.db.commit()
+
+    def fmt(self, n):
+        return f"{n:,}".replace(",", " ")
 
     group = app_commands.Group(name="banque", description="🏦 Services bancaires secondaires")
 
