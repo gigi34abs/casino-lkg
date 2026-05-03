@@ -10,7 +10,7 @@ class Autres2(commands.Cog):
     async def help_command(self, interaction: discord.Interaction):
         embed = discord.Embed(
             title="🎰 GUIDE COMPLET DU CASINO",
-            description="Voici toutes les informations sur les jeux, la banque et les maisons.",
+            description="Voici toutes les informations sur les jeux, la banque et les bonus.",
             color=0x2f3136 
         )
 
@@ -37,18 +37,6 @@ class Autres2(commands.Cog):
                 "**`/banque secours`** : Disponible si tu as moins de -400€"
             ),
             inline=False
-        )
-
-        # --- SECTION MAISONS (MODIFIÉE) ---
-        embed.add_field(
-            name="🏠 Système de Maisons",
-            value=(
-                "⚠️ *Bientôt disponible :*\n"
-                "• `/maisons contribuer`\n"
-                "• `/maisons liste`\n"
-                "**💰 Taxe de maison :** 7 500€ / jour"
-            ),
-            inline=True
         )
 
         # --- SECTION GIVEAWAYS ---
