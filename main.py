@@ -10,7 +10,7 @@ import sqlite3
 ID_CATEGORIE_CASINO = 1498394439079559318
 ID_ROLE_VIP = 1499809955841310871
 
-# Vos IDs d'utilisateurs pour un accès total
+# Tes IDs d'utilisateurs pour un accès total (Admins)
 ADMIN_IDS = [
     1495018019674390678,
     1433802915205742612,
@@ -23,7 +23,9 @@ app = Flask('')
 def home(): return "✅ Bot Opérationnel"
 
 def run_web():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+    # Railway utilise la variable d'environnement PORT
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # --- 3. STRUCTURE DU BOT ---
 class MyBot(commands.Bot):
@@ -39,10 +41,11 @@ class MyBot(commands.Bot):
 
     def create_tables(self):
         cursor = self.db.cursor()
+        # MODIFICATION : money DEFAULT passe de 1000 à 100
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
-                money INTEGER DEFAULT 1000,
+                money INTEGER DEFAULT 100,
                 banque INTEGER DEFAULT 0,
                 last_daily REAL DEFAULT 0,
                 daily_streak INTEGER DEFAULT 0,
@@ -54,8 +57,17 @@ class MyBot(commands.Bot):
         self.db.commit()
 
     async def setup_hook(self):
-        # On charge les extensions (fichiers séparés)
-        extensions = ['banque', 'jeux', 'admin', 'autre', 'boutique', 'autres2', 'verification']
+        # On charge toutes tes extensions
+        extensions = [
+            'banque', 
+            'jeux', 
+            'admin', 
+            'autre', 
+            'boutique', 
+            'autres2', 
+            'verification'
+        ]
+        
         for ext in extensions:
             try:
                 await self.load_extension(ext)
@@ -63,16 +75,16 @@ class MyBot(commands.Bot):
             except Exception as e:
                 print(f"❌ Erreur sur {ext} : {e}")
         
-        # Synchronisation des commandes slash
+        # Synchronisation des commandes slash avec Discord
         await self.tree.sync()
-        print("✨ Commandes synchronisées !")
+        print("✨ Toutes les commandes sont synchronisées !")
 
 bot = MyBot()
 
 # --- 4. LE VERROU DE SÉCURITÉ GLOBAL ---
 @bot.tree.interaction_check
 async def global_check(interaction: discord.Interaction) -> bool:
-    # A. Si l'utilisateur est un ADMIN (par ID), il passe tout sans restriction
+    # A. Si l'utilisateur est un ADMIN (par ID), il passe tout
     if interaction.user.id in ADMIN_IDS:
         return True
 
@@ -85,16 +97,19 @@ async def global_check(interaction: discord.Interaction) -> bool:
     # C. Vérification de la Catégorie (pour les autres)
     current_cat = getattr(interaction.channel, 'category_id', None)
     if current_cat != ID_CATEGORIE_CASINO:
-        await interaction.response.send_message(f"🎰 **Mauvais salon** : Les commandes sont réservées à la catégorie <#{ID_CATEGORIE_CASINO}>.", ephemeral=True)
+        await interaction.response.send_message(f"🎰 **Mauvais salon** : Va dans la catégorie <#{ID_CATEGORIE_CASINO}> pour jouer !", ephemeral=True)
         return False
 
     return True
 
 # --- 5. LANCEMENT ---
 if __name__ == "__main__":
+    # Démarrage du serveur web pour Railway
     threading.Thread(target=run_web, daemon=True).start()
+    
+    # Récupération du Token
     token = os.environ.get('TOKEN')
     if token:
         bot.run(token)
     else:
-        print("❌ AUCUN TOKEN DÉTECTÉ DANS RAILWAY")
+        print("❌ ERREUR : Aucun TOKEN trouvé dans les variables d'environnement Railway.")
