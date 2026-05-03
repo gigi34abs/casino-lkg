@@ -5,7 +5,7 @@ from discord.ext import commands
 class Verification(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Tes 3 IDs Admins pour lancer la commande du panel
+        # Tes 3 IDs Admins
         self.admin_ids = [
             1495018019674390678,
             1433802915205742612,
@@ -13,9 +13,9 @@ class Verification(commands.Cog):
         ]
         self.ID_ROLE_VIP = 1499809955841310871
 
-    @app_commands.command(name="setup_acces", description="Générer le panel d'accès au Casino (Admin uniquement)")
+    @app_commands.command(name="setup_acces", description="Générer le panel d'accès (Admin uniquement)")
     async def setup_acces(self, interaction: discord.Interaction):
-        # 1. Vérification Admin
+        # Vérification Admin
         if interaction.user.id not in self.admin_ids:
             return await interaction.response.send_message("⛔ Seul un administrateur peut configurer le panel.", ephemeral=True)
 
@@ -26,40 +26,43 @@ class Verification(commands.Cog):
                 "**En cliquant sur le bouton ci-dessous :**\n"
                 "✅ Tu reconnais avoir lu le règlement.\n"
                 "✅ Tu acceptes les prélèvements de taxes quotidiennes (1 500 €).\n"
-                "✅ Ton compte bancaire sera officiellement ouvert (1 000 € offerts).\n"
-                "✅ Tu recevras le rôle <@&1499809955841310871> pour accéder aux salons."
+                "✅ Ton compte bancaire sera ouvert (**100 € offerts**).\n"
+                "✅ Tu recevras le rôle <@&1499809955841310871>."
             ),
             color=0x5865F2
         )
-        embed.set_footer(text="L'abus de jeu est dangereux pour la santé de ton portefeuille virtuel.")
+        embed.set_footer(text="Clique sur le bouton vert pour commencer l'aventure.")
 
-        # --- CLASSE POUR LE BOUTON D'ACCEPTATION ---
+        # --- CLASSE DU BOUTON (Accessible à tous) ---
         class AccesView(discord.ui.View):
             def __init__(self, bot, role_id):
-                super().__init__(timeout=None) # Le bouton ne périme jamais
+                super().__init__(timeout=None)
                 self.bot = bot
                 self.role_id = role_id
 
             @discord.ui.button(label="J'accepte et je joue !", style=discord.ButtonStyle.green, emoji="✅", custom_id="btn_acces_casino")
             async def accept(self, i: discord.Interaction, button: discord.ui.Button):
-                # Vérifier si l'utilisateur a déjà le rôle
+                # Cette interaction est traitée même sans le rôle VIP car c'est elle qui le DONNE
                 role = i.guild.get_role(self.role_id)
+                
+                if not role:
+                    return await i.response.send_message("❌ Erreur : Le rôle VIP n'existe pas.", ephemeral=True)
+
                 if role in i.user.roles:
-                    return await i.response.send_message("✨ Tu es déjà membre du Casino !", ephemeral=True)
+                    return await i.response.send_message("✨ Tu as déjà accès au Casino !", ephemeral=True)
 
-                # 1. Donner le rôle VIP
                 try:
+                    # 1. Donner le rôle VIP
                     await i.user.add_roles(role)
-                except:
-                    return await i.response.send_message("❌ Erreur : Je n'ai pas la permission de donner le rôle.", ephemeral=True)
+                    
+                    # 2. Créer le compte avec 100€
+                    cursor = self.bot.db.cursor()
+                    cursor.execute("INSERT OR IGNORE INTO users (user_id, money) VALUES (?, ?)", (i.user.id, 100))
+                    self.bot.db.commit()
 
-                # 2. Créer le compte bancaire en SQLite
-                cursor = self.bot.db.cursor()
-                # On utilise INSERT OR IGNORE pour ne pas écraser s'il existe déjà
-                cursor.execute("INSERT OR IGNORE INTO users (user_id, money) VALUES (?, ?)", (i.user.id, 1000))
-                self.bot.db.commit()
-
-                await i.response.send_message("🎉 Félicitations ! Ton compte est ouvert et tu es désormais VIP.", ephemeral=True)
+                    await i.response.send_message("🎉 Compte créé avec **100 €** ! Tu peux maintenant accéder aux salons.", ephemeral=True)
+                except Exception as e:
+                    await i.response.send_message(f"❌ Erreur de permissions : {e}", ephemeral=True)
 
         await interaction.response.send_message("Panel envoyé !", ephemeral=True)
         await interaction.channel.send(embed=embed, view=AccesView(self.bot, self.ID_ROLE_VIP))
