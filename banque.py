@@ -63,91 +63,102 @@ class Banque(commands.Cog):
     group = app_commands.Group(name="banque", description="🏦 Gestion bancaire principale")
 
     @group.command(name="argent", description="💰 Gérer votre portefeuille et votre banque")
-    async def argent(self, interaction: discord.Interaction):
-        u = self.get_user_data(interaction.user.id)
+async def argent(self, interaction: discord.Interaction):
+    u = self.get_user_data(interaction.user.id)
 
-        def create_embed(user_stats, member: discord.Member):
-            total = user_stats["portefeuille"] + user_stats["banque"]
-            pct_banque = int((user_stats["banque"] / total * 100)) if total > 0 else 0
-            pct_wallet = 100 - pct_banque
+    def create_embed(user_stats, member: discord.Member):
+        total = user_stats["portefeuille"] + user_stats["banque"]
+        pct_banque = int((user_stats["banque"] / total * 100)) if total > 0 else 0
+        pct_wallet = 100 - pct_banque
 
-            e = discord.Embed(title=f"🏦 Compte de {member.display_name}", color=0x5865F2)
-            e.set_thumbnail(url=member.display_avatar.url)
-            e.add_field(name="💵 Portefeuille", value=f"```\n{self.fmt(user_stats['portefeuille'])} €\n```", inline=True)
-            e.add_field(name="🏛️ Banque", value=f"```\n{self.fmt(user_stats['banque'])} €\n```", inline=True)
-            e.add_field(name="\u200b", value="\u200b", inline=True)
-            
-            bar_wallet = "█" * (pct_wallet // 10) + "░" * (10 - pct_wallet // 10)
-            bar_banque = "█" * (pct_banque // 10) + "░" * (10 - pct_banque // 10)
-            e.add_field(name="📊 Répartition", value=f"💵 `{bar_wallet}` {pct_wallet}%\n🏛️ `{bar_banque}` {pct_banque}%", inline=False)
-            e.add_field(name="💳 Patrimoine total", value=f"**`{self.fmt(total)} €`**", inline=False)
-            e.set_footer(text="Gérez votre argent via les boutons")
-            return e
+        e = discord.Embed(title=f"🏦 Compte de {member.display_name}", color=0x5865F2)
+        e.set_thumbnail(url=member.display_avatar.url)
+        e.add_field(name="💵 Portefeuille", value=f"```\n{self.fmt(user_stats['portefeuille'])} €\n```", inline=True)
+        e.add_field(name="🏛️ Banque", value=f"```\n{self.fmt(user_stats['banque'])} €\n```", inline=True)
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+        
+        bar_wallet = "█" * (pct_wallet // 10) + "░" * (10 - pct_wallet // 10)
+        bar_banque = "█" * (pct_banque // 10) + "░" * (10 - pct_banque // 10)
+        e.add_field(name="📊 Répartition", value=f"💵 `{bar_wallet}` {pct_wallet}%\n🏛️ `{bar_banque}` {pct_banque}%", inline=False)
+        e.add_field(name="💳 Patrimoine total", value=f"**`{self.fmt(total)} €`**", inline=False)
+        e.set_footer(text="Gérez votre argent via les boutons")
+        return e
 
-        # --- MODAL POUR LES SAISIES ---
-        class MontantModal(discord.ui.Modal):
-            def __init__(self, title, label, cog, owner_id, action):
-                super().__init__(title=title)
-                self.cog = cog
-                self.owner_id = owner_id
-                self.action = action
-                self.montant_input = discord.ui.TextInput(label=label, placeholder="Ex: 500", min_length=1, max_length=12)
-                self.add_item(self.montant_input)
+    # --- MODAL POUR LES SAISIES ---
+    class MontantModal(discord.ui.Modal):
+        def __init__(self, title, label, cog, owner_id, action):
+            super().__init__(title=title)
+            self.cog = cog
+            self.owner_id = owner_id
+            self.action = action
+            self.montant_input = discord.ui.TextInput(label=label, placeholder="Ex: 500", min_length=1, max_length=12)
+            self.add_item(self.montant_input)
 
-            async def on_submit(self, i: discord.Interaction):
-                try:
-                    montant = int(self.montant_input.value.replace(" ", "").replace(",", ""))
-                    if montant <= 0: raise ValueError
-                except ValueError:
-                    return await i.response.send_message("❌ Montant invalide.", ephemeral=True)
+        async def on_submit(self, i: discord.Interaction):
+            # Sécurité supplémentaire au cas où le modal resterait ouvert
+            if i.user.id != self.owner_id:
+                return await i.response.send_message("❌ Ce n'est pas votre compte !", ephemeral=True)
 
-                u = self.cog.get_user_data(self.owner_id)
-                if self.action == "deposer":
-                    if montant > u["portefeuille"]:
-                        return await i.response.send_message("❌ Pas assez d'argent en poche.", ephemeral=True)
-                    u["portefeuille"] -= montant
-                    u["banque"] += montant
-                else:
-                    if montant > u["banque"]:
-                        return await i.response.send_message("❌ Pas assez d'argent en banque.", ephemeral=True)
-                    u["banque"] -= montant
-                    u["portefeuille"] += montant
+            try:
+                montant = int(self.montant_input.value.replace(" ", "").replace(",", ""))
+                if montant <= 0: raise ValueError
+            except ValueError:
+                return await i.response.send_message("❌ Montant invalide.", ephemeral=True)
 
-                self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
-                await i.response.edit_message(embed=create_embed(u, i.user))
+            u = self.cog.get_user_data(self.owner_id)
+            if self.action == "deposer":
+                if montant > u["portefeuille"]:
+                    return await i.response.send_message("❌ Pas assez d'argent en poche.", ephemeral=True)
+                u["portefeuille"] -= montant
+                u["banque"] += montant
+            else:
+                if montant > u["banque"]:
+                    return await i.response.send_message("❌ Pas assez d'argent en banque.", ephemeral=True)
+                u["banque"] -= montant
+                u["portefeuille"] += montant
 
-        # --- VIEW POUR LES BOUTONS ---
-        class BankView(discord.ui.View):
-            def __init__(self, cog, owner_id):
-                super().__init__(timeout=120)
-                self.cog = cog
-                self.owner_id = owner_id
+            self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
+            await i.response.edit_message(embed=create_embed(u, i.user))
 
-            @discord.ui.button(label="Tout déposer", emoji="⬆️", style=discord.ButtonStyle.success)
-            async def dep_all(self, i: discord.Interaction, b):
-                u = self.cog.get_user_data(self.owner_id)
-                if u["portefeuille"] <= 0: return await i.response.send_message("Portefeuille vide !", ephemeral=True)
-                m = u["portefeuille"]; u["banque"] += m; u["portefeuille"] = 0
-                self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
-                await i.response.edit_message(embed=create_embed(u, i.user))
+    # --- VIEW POUR LES BOUTONS ---
+    class BankView(discord.ui.View):
+        def __init__(self, cog, owner_id):
+            super().__init__(timeout=120)
+            self.cog = cog
+            self.owner_id = owner_id
 
-            @discord.ui.button(label="Tout retirer", emoji="⬇️", style=discord.ButtonStyle.danger)
-            async def wit_all(self, i: discord.Interaction, b):
-                u = self.cog.get_user_data(self.owner_id)
-                if u["banque"] <= 0: return await i.response.send_message("Banque vide !", ephemeral=True)
-                m = u["banque"]; u["portefeuille"] += m; u["banque"] = 0
-                self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
-                await i.response.edit_message(embed=create_embed(u, i.user))
+        # --- C'EST ICI QU'ON BLOQUE LES AUTRES JOUEURS ---
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != self.owner_id:
+                await interaction.response.send_message("❌ Vous ne pouvez pas gérer le compte de quelqu'un d'autre !", ephemeral=True)
+                return False
+            return True
 
-            @discord.ui.button(label="Dépôt", emoji="💰", style=discord.ButtonStyle.primary)
-            async def dep_custom(self, i: discord.Interaction, b):
-                await i.response.send_modal(MontantModal("Dépôt", "Montant (€)", self.cog, self.owner_id, "deposer"))
+        @discord.ui.button(label="Tout déposer", emoji="⬆️", style=discord.ButtonStyle.success)
+        async def dep_all(self, i: discord.Interaction, b):
+            u = self.cog.get_user_data(self.owner_id)
+            if u["portefeuille"] <= 0: return await i.response.send_message("Portefeuille vide !", ephemeral=True)
+            m = u["portefeuille"]; u["banque"] += m; u["portefeuille"] = 0
+            self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
+            await i.response.edit_message(embed=create_embed(u, i.user))
 
-            @discord.ui.button(label="Retrait", emoji="💸", style=discord.ButtonStyle.secondary)
-            async def wit_custom(self, i: discord.Interaction, b):
-                await i.response.send_modal(MontantModal("Retrait", "Montant (€)", self.cog, self.owner_id, "retirer"))
+        @discord.ui.button(label="Tout retirer", emoji="⬇️", style=discord.ButtonStyle.danger)
+        async def wit_all(self, i: discord.Interaction, b):
+            u = self.cog.get_user_data(self.owner_id)
+            if u["banque"] <= 0: return await i.response.send_message("Banque vide !", ephemeral=True)
+            m = u["banque"]; u["portefeuille"] += m; u["banque"] = 0
+            self.cog.update_user_data(self.owner_id, u["portefeuille"], u["banque"])
+            await i.response.edit_message(embed=create_embed(u, i.user))
 
-        await interaction.response.send_message(embed=create_embed(u, interaction.user), view=BankView(self, interaction.user.id))
+        @discord.ui.button(label="Dépôt", emoji="💰", style=discord.ButtonStyle.primary)
+        async def dep_custom(self, i: discord.Interaction, b):
+            await i.response.send_modal(MontantModal("Dépôt", "Montant (€)", self.cog, self.owner_id, "deposer"))
+
+        @discord.ui.button(label="Retrait", emoji="💸", style=discord.ButtonStyle.secondary)
+        async def wit_custom(self, i: discord.Interaction, b):
+            await i.response.send_modal(MontantModal("Retrait", "Montant (€)", self.cog, self.owner_id, "retirer"))
+
+    await interaction.response.send_message(embed=create_embed(u, interaction.user), view=BankView(self, interaction.user.id))
 
     @group.command(name="journalier", description="🎁 Récupère tes 500 € gratuits")
     async def journalier(self, interaction: discord.Interaction):
