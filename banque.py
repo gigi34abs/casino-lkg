@@ -6,27 +6,14 @@ import time
 class Banque(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Configuration simple
+        # Configuration des IDs
         self.ID_ROLE_VIP = 1499809955841310871
         self.ID_CATEGORIE_CASINO = 1498394439079559318
 
-    # --- SÉCURITÉ AUTOMATIQUE ---
-    async def cog_app_command_error(self, interaction: discord.Interaction, error):
-        """Vérification globale pour toutes les commandes de ce fichier"""
-        has_vip = any(role.id == self.ID_ROLE_VIP for role in interaction.user.roles)
-        current_cat = getattr(interaction.channel, 'category_id', None)
-
-        if not has_vip:
-            return await interaction.response.send_message("🚫 **Accès refusé** : Le rôle VIP est requis.", ephemeral=True)
-        
-        if current_cat != self.ID_CATEGORIE_CASINO:
-            return await interaction.response.send_message(f"🎰 **Mauvais salon** : Va dans la catégorie <#{self.ID_CATEGORIE_CASINO}>.", ephemeral=True)
-
-    # --- TES FONCTIONS ---
     def get_user_data(self, user_id):
         """Récupère les données depuis SQLite avec sécurité"""
         cursor = self.bot.db.cursor()
-        # Mis à 100€ pour coller au reste du bot
+        # On s'assure que l'utilisateur commence avec 100€
         cursor.execute('''
             INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) 
             VALUES (?, ?, ?, ?, ?)
@@ -59,6 +46,8 @@ class Banque(commands.Cog):
     def fmt(self, n):
         """Formatage des nombres : 1 000 000 €"""
         return f"{n:,}".replace(",", " ")
+
+    # Tu peux maintenant coller tes commandes (argent, voir, etc.) juste en dessous
 
     group = app_commands.Group(name="banque", description="🏦 Gestion bancaire principale")
 
