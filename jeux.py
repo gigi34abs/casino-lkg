@@ -7,11 +7,29 @@ import asyncio
 class Jeux(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Configuration des IDs
+        self.ID_ROLE_VIP = 1499809955841310871
+        self.ID_CATEGORIE_CASINO = 1498394439079559318
 
+    # --- LA BARRIÈRE DE SÉCURITÉ ---
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user_role_ids = [role.id for role in interaction.user.roles]
+        if self.ID_ROLE_VIP not in user_role_ids:
+            await interaction.response.send_message("🚫 **Accès refusé** : Tu dois avoir le rôle VIP pour jouer aux jeux du Casino.", ephemeral=True)
+            return False
+
+        current_cat = getattr(interaction.channel, 'category_id', None)
+        if current_cat != self.ID_CATEGORIE_CASINO:
+            await interaction.response.send_message(f"🎰 **Mauvais salon** : Les jeux ne sont autorisés que dans la catégorie <#{self.ID_CATEGORIE_CASINO}>.", ephemeral=True)
+            return False
+
+        return True
+
+    # --- TES FONCTIONS DE DONNÉES ---
     def get_user(self, user_id):
-        """Récupère le solde du joueur dans SQLite"""
+        """Récupère le solde du joueur dans SQLite (Départ 100€)"""
         cursor = self.bot.db.cursor()
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) VALUES (?, ?, ?, ?, ?)", (user_id, 1000, 0, 0, 0))
+        cursor.execute("INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) VALUES (?, ?, ?, ?, ?)", (user_id, 100, 0, 0, 0))
         self.bot.db.commit()
         cursor.execute("SELECT money FROM users WHERE user_id = ?", (user_id,))
         return cursor.fetchone()[0]
