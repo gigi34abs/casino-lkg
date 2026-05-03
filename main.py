@@ -55,7 +55,7 @@ class MyBot(commands.Bot):
 
     async def setup_hook(self):
         # On charge les extensions (fichiers séparés)
-        extensions = ['banque', 'jeux', 'admin', 'autre', 'boutique', 'autres2']
+        extensions = ['banque', 'jeux', 'admin', 'autre', 'boutique', 'autres2', 'verification']
         for ext in extensions:
             try:
                 await self.load_extension(ext)
