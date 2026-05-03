@@ -449,26 +449,23 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=PFView(self, pari))
 
-# ==================== CONNECTE 4 (Version Finale & Stable) ====================
-    @app_commands.command(name="connecte4", description="🔴 Duel Puissance 4 avec mise")
-    @app_commands.describe(adversaire="Le joueur à défier", mise="Montant à parier")
-    @app_commands.guild_only()
+# ==================== CONNECTE 4 (Version Originale sans Bug Argent) ====================
+    @group.command(name="connecte4", description="🔴 Duel Puissance 4 contre un autre joueur")
     async def connecte4(self, interaction: discord.Interaction, adversaire: discord.Member, mise: int):
         if adversaire.id == interaction.user.id or adversaire.bot:
             return await interaction.response.send_message("❌ Action impossible.", ephemeral=True)
 
-        # Vérification des fonds
         u1_solde = self.get_user(interaction.user.id)
-        if u1_solde < mise:
-            return await interaction.response.send_message(f"❌ Tu n'as pas assez d'argent ({self.fmt(u1_solde)} €).", ephemeral=True)
+        err = self.check_mise(mise, 1, 50000, u1_solde)
+        if err: return await interaction.response.send_message(err, ephemeral=True)
 
         u2_solde = self.get_user(adversaire.id)
         if u2_solde < mise:
             return await interaction.response.send_message(f"❌ **{adversaire.display_name}** n'a pas assez d'argent.", ephemeral=True)
 
-        embed_invite = discord.Embed(
+        embed = discord.Embed(
             title="🔴 PUISSANCE 4 : DÉFI",
-            description=f"{interaction.user.mention} défie {adversaire.mention} !\n💰 Mise : **{self.fmt(mise)} €** par joueur.",
+            description=f"{interaction.user.mention} défie {adversaire.mention} !\n💰 Enjeu : **{self.fmt(mise)} €**",
             color=0xE74C3C
         )
 
@@ -477,114 +474,90 @@ class Jeux(commands.Cog):
                 super().__init__(timeout=60)
                 self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
 
-            @discord.ui.button(label="Accepter", style=discord.ButtonStyle.success, emoji="✅")
+            @discord.ui.button(label="Accepter", emoji="✅", style=discord.ButtonStyle.success)
             async def accept(self, i: discord.Interaction, b):
-                if i.user.id != self.p2.id:
-                    return await i.response.send_message("❌ Pas pour toi.", ephemeral=True)
+                if i.user.id != self.p2.id: return await i.response.send_message("❌ Pas pour toi.", ephemeral=True)
                 
-                # Prélèvement des mises AVANT de lancer
+                # --- CORRECTIF ARGENT : Prélèvement immédiat ---
                 self.cog.update_money(self.p1.id, -self.mise)
                 self.cog.update_money(self.p2.id, -self.mise)
                 
-                game_view = C4Game(self.cog, self.p1, self.p2, self.mise)
-                # On édite le message pour lancer le plateau
-                await i.response.edit_message(content=game_view.get_status_msg(), embed=None, view=game_view)
+                await i.response.edit_message(content=f"🎮 Le match commence !\n🔴 {self.p1.mention} vs 🟡 {self.p2.mention}", embed=None, view=C4Game(self.cog, self.p1, self.p2, self.mise))
 
-            @discord.ui.button(label="Refuser", style=discord.ButtonStyle.danger, emoji="✖️")
+            @discord.ui.button(label="Refuser", emoji="🚫", style=discord.ButtonStyle.danger)
             async def deny(self, i: discord.Interaction, b):
-                if i.user.id != self.p2.id:
-                    return await i.response.send_message("❌ Pas pour toi.", ephemeral=True)
-                await i.response.edit_message(content="❌ Défi refusé.", embed=None, view=None)
+                if i.user.id != self.p2.id: return await i.response.send_message("❌ Pas pour toi.", ephemeral=True)
+                await i.response.edit_message(content="❌ Duel refusé.", embed=None, view=None)
 
-        await interaction.response.send_message(embed=embed_invite, view=C4Invite(self, interaction.user, adversaire, mise))
+        class C4Game(discord.ui.View):
+            def __init__(self, cog, p1, p2, mise):
+                super().__init__(timeout=300)
+                self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
+                self.board = [[0 for _ in range(7)] for _ in range(6)]
+                self.turn = p1
+                self.symbols = {0: "⚪", 1: "🔴", 2: "🟡"}
 
-# --- CLASSE DU JEU (À placer en dehors de la fonction connecte4) ---
-class C4Game(discord.ui.View):
-    def __init__(self, cog, p1, p2, mise):
-        super().__init__(timeout=300)
-        self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
-        self.board = [[0 for _ in range(7)] for _ in range(6)]
-        self.turn = p1
-        self.symbols = {0: "⚪", 1: "🔴", 2: "🟡"}
-        self.finished = False
+            def get_board_text(self):
+                header = "1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣ 7️⃣\n"
+                board_str = ""
+                for row in self.board:
+                    board_str += "".join([self.symbols[cell] for cell in row]) + "\n"
+                return f"C'est au tour de {self.turn.mention}\n{header}{board_str}"
 
-    def get_status_msg(self):
-        status = f"🎮 **Match lancé !**\n🔴 {self.p1.mention} vs 🟡 {self.p2.mention}\n\n"
-        status += f"C'est au tour de : **{self.turn.display_name}**\n"
-        status += "1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣\n"
-        for row in self.board:
-            status += "".join([self.symbols[c] for c in row]) + "\n"
-        return status
+            async def play(self, i, col):
+                if i.user.id != self.turn.id: return await i.response.send_message("❌ Pas ton tour !", ephemeral=True)
+                
+                for r in range(5, -1, -1):
+                    if self.board[r][col] == 0:
+                        self.board[r][col] = 1 if self.turn == self.p1 else 2
+                        break
+                else: return await i.response.send_message("❌ Colonne pleine !", ephemeral=True)
 
-    def check_win(self, p):
-        # Horizontal
-        for r in range(6):
-            for c in range(4):
-                if all(self.board[r][c+i] == p for i in range(4)): return True
-        # Vertical
-        for r in range(3):
-            for c in range(7):
-                if all(self.board[r+i][c] == p for i in range(4)): return True
-        # Diagonale /
-        for r in range(3, 6):
-            for c in range(4):
-                if all(self.board[r-i][c+i] == p for i in range(4)): return True
-        # Diagonale \
-        for r in range(3):
-            for c in range(4):
-                if all(self.board[r+i][c+i] == p for i in range(4)): return True
-        return False
+                # --- CORRECTIF ARGENT : Gain du double si victoire ---
+                p_val = 1 if self.turn == self.p1 else 2
+                if self.check_win(p_val):
+                    self.cog.update_money(self.turn.id, self.mise * 2)
+                    return await i.response.edit_message(content=f"🏆 {self.turn.mention} a gagné **{self.cog.fmt(self.mise*2)} €** !\n{self.get_board_text()}", view=None)
 
-    async def play(self, i: discord.Interaction, col):
-        if i.user.id != self.turn.id:
-            return await i.response.send_message("❌ Pas ton tour !", ephemeral=True)
+                if all(self.board[0][c] != 0 for c in range(7)):
+                    self.cog.update_money(self.p1.id, self.mise)
+                    self.cog.update_money(self.p2.id, self.mise)
+                    return await i.response.edit_message(content="🤝 Égalité ! Mises rendues.", view=None)
 
-        if self.finished: return
+                self.turn = self.p2 if self.turn == self.p1 else self.p1
+                await i.response.edit_message(content=self.get_board_text())
 
-        # Trouver la ligne libre
-        row_idx = -1
-        for r in range(5, -1, -1):
-            if self.board[r][col] == 0:
-                self.board[r][col] = 1 if self.turn == self.p1 else 2
-                row_idx = r
-                break
-        
-        if row_idx == -1:
-            return await i.response.send_message("❌ Colonne pleine !", ephemeral=True)
+            def check_win(self, p):
+                for r in range(6):
+                    for c in range(4):
+                        if all(self.board[r][c+i] == p for i in range(4)): return True
+                for r in range(3):
+                    for c in range(7):
+                        if all(self.board[r+i][c] == p for i in range(4)): return True
+                for r in range(3, 6):
+                    for c in range(4):
+                        if all(self.board[r-i][c+i] == p for i in range(4)): return True
+                for r in range(3):
+                    for c in range(4):
+                        if all(self.board[r+i][c+i] == p for i in range(4)): return True
+                return False
 
-        p_val = 1 if self.turn == self.p1 else 2
-        
-        # Vérifier victoire
-        if self.check_win(p_val):
-            self.finished = True
-            self.cog.update_money(self.turn.id, self.mise * 2)
-            return await i.response.edit_message(content=f"🏆 **{self.turn.display_name}** gagne **{self.cog.fmt(self.mise*2)} €** !\n\n{self.get_status_msg()}", view=None)
+            @discord.ui.button(label="1", style=discord.ButtonStyle.gray)
+            async def b1(self, i, b): await self.play(i, 0)
+            @discord.ui.button(label="2", style=discord.ButtonStyle.gray)
+            async def b2(self, i, b): await self.play(i, 1)
+            @discord.ui.button(label="3", style=discord.ButtonStyle.gray)
+            async def b3(self, i, b): await self.play(i, 2)
+            @discord.ui.button(label="4", style=discord.ButtonStyle.gray)
+            async def b4(self, i, b): await self.play(i, 3)
+            @discord.ui.button(label="5", style=discord.ButtonStyle.gray)
+            async def b5(self, i, b): await self.play(i, 4)
+            @discord.ui.button(label="6", style=discord.ButtonStyle.gray)
+            async def b6(self, i, b): await self.play(i, 5)
+            @discord.ui.button(label="7", style=discord.ButtonStyle.gray)
+            async def b7(self, i, b): await self.play(i, 6)
 
-        # Vérifier égalité
-        if all(self.board[0][c] != 0 for c in range(7)):
-            self.finished = True
-            self.cog.update_money(self.p1.id, self.mise)
-            self.cog.update_money(self.p2.id, self.mise)
-            return await i.response.edit_message(content=f"🤝 **Égalité !** Mises rendues.\n\n{self.get_status_msg()}", view=None)
-
-        # Changer de tour
-        self.turn = self.p2 if self.turn == self.p1 else self.p1
-        await i.response.edit_message(content=self.get_status_msg())
-
-    @discord.ui.button(label="1", style=discord.ButtonStyle.gray)
-    async def b1(self, i, b): await self.play(i, 0)
-    @discord.ui.button(label="2", style=discord.ButtonStyle.gray)
-    async def b2(self, i, b): await self.play(i, 1)
-    @discord.ui.button(label="3", style=discord.ButtonStyle.gray)
-    async def b3(self, i, b): await self.play(i, 2)
-    @discord.ui.button(label="4", style=discord.ButtonStyle.gray)
-    async def b4(self, i, b): await self.play(i, 3)
-    @discord.ui.button(label="5", style=discord.ButtonStyle.gray)
-    async def b5(self, i, b): await self.play(i, 4)
-    @discord.ui.button(label="6", style=discord.ButtonStyle.gray)
-    async def b6(self, i, b): await self.play(i, 5)
-    @discord.ui.button(label="7", style=discord.ButtonStyle.gray)
-    async def b7(self, i, b): await self.play(i, 6)
+        await interaction.response.send_message(embed=embed, view=C4Invite(self, interaction.user, adversaire, mise))
 
 async def setup(bot):
     await bot.add_cog(Jeux(bot))
