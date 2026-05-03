@@ -38,7 +38,6 @@ class MyBot(commands.Bot):
 
     def create_tables(self):
         cursor = self.db.cursor()
-        # Création avec le nouveau défaut de 100€
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
@@ -52,23 +51,13 @@ class MyBot(commands.Bot):
             )
         ''')
         
-        # --- RESET FORCE POUR LES ANCIENS COMPTES ---
-        # Si un joueur a exactement 1000€ (le départ d'avant), on le passe à 100€
+        # --- RESET TOTAL FORCE ---
+        # On passe TOUT LE MONDE à 100€ s'ils avaient encore 1000€
         cursor.execute("UPDATE users SET money = 100 WHERE money = 1000")
-        
         self.db.commit()
 
     async def setup_hook(self):
-        extensions = [
-            'banque', 
-            'jeux', 
-            'admin', 
-            'autre', 
-            'boutique', 
-            'autres2', 
-            'verification'
-        ]
-        
+        extensions = ['banque', 'jeux', 'admin', 'autre', 'boutique', 'autres2', 'verification']
         for ext in extensions:
             try:
                 await self.load_extension(ext)
@@ -81,30 +70,24 @@ class MyBot(commands.Bot):
 
 bot = MyBot()
 
-# --- 4. LE VERROU DE SÉCURITÉ GLOBAL ---
+# --- 4. LE VERROU DE SÉCURITÉ GLOBAL (Admins inclus) ---
 @bot.tree.interaction_check
 async def global_check(interaction: discord.Interaction) -> bool:
-    # Les Admins passent tout
-    if interaction.user.id in ADMIN_IDS:
-        return True
-
-    # Exception pour le panel de vérification (pour que les nouveaux puissent cliquer)
-    # On laisse passer l'interaction si elle provient du bouton de vérification
+    # 1. Exception pour le bouton de vérification (pour que les nouveaux puissent cliquer)
     if interaction.type == discord.InteractionType.component:
         if interaction.data.get('custom_id') == "btn_acces_casino":
             return True
 
-    # Vérification du Rôle VIP
+    # 2. Vérification du Rôle VIP (Obligatoire pour TOUS, même admins)
     has_vip = any(role.id == ID_ROLE_VIP for role in interaction.user.roles)
     if not has_vip:
-        # On ne bloque pas la commande /setup_acces si c'est un admin (déjà géré plus haut)
         await interaction.response.send_message("🚫 **Accès refusé** : Tu dois avoir le rôle VIP pour utiliser le bot.", ephemeral=True)
         return False
 
-    # Vérification de la Catégorie
+    # 3. Vérification de la Catégorie (Obligatoire pour TOUS, même admins)
     current_cat = getattr(interaction.channel, 'category_id', None)
     if current_cat != ID_CATEGORIE_CASINO:
-        await interaction.response.send_message(f"🎰 **Mauvais salon** : Va dans la catégorie <#{ID_CATEGORIE_CASINO}> pour jouer !", ephemeral=True)
+        await interaction.response.send_message(f"🎰 **Mauvais salon** : Les commandes sont réservées à la catégorie <#{ID_CATEGORIE_CASINO}>.", ephemeral=True)
         return False
 
     return True
