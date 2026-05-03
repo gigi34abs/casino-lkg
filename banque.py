@@ -6,15 +6,31 @@ import time
 class Banque(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Configuration simple
+        self.ID_ROLE_VIP = 1499809955841310871
+        self.ID_CATEGORIE_CASINO = 1498394439079559318
 
+    # --- SÉCURITÉ AUTOMATIQUE ---
+    async def cog_app_command_error(self, interaction: discord.Interaction, error):
+        """Vérification globale pour toutes les commandes de ce fichier"""
+        has_vip = any(role.id == self.ID_ROLE_VIP for role in interaction.user.roles)
+        current_cat = getattr(interaction.channel, 'category_id', None)
+
+        if not has_vip:
+            return await interaction.response.send_message("🚫 **Accès refusé** : Le rôle VIP est requis.", ephemeral=True)
+        
+        if current_cat != self.ID_CATEGORIE_CASINO:
+            return await interaction.response.send_message(f"🎰 **Mauvais salon** : Va dans la catégorie <#{self.ID_CATEGORIE_CASINO}>.", ephemeral=True)
+
+    # --- TES FONCTIONS ---
     def get_user_data(self, user_id):
         """Récupère les données depuis SQLite avec sécurité"""
         cursor = self.bot.db.cursor()
-        # Correction ici : on s'assure d'insérer TOUTES les colonnes nécessaires pour éviter les erreurs
+        # Mis à 100€ pour coller au reste du bot
         cursor.execute('''
             INSERT OR IGNORE INTO users (user_id, money, banque, last_daily, daily_streak) 
             VALUES (?, ?, ?, ?, ?)
-        ''', (user_id, 1000, 0, 0, 0))
+        ''', (user_id, 100, 0, 0, 0))
         self.bot.db.commit()
         
         cursor.execute("SELECT money, banque, last_daily, daily_streak FROM users WHERE user_id = ?", (user_id,))
