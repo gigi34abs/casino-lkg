@@ -97,8 +97,8 @@ class Autres2(commands.Cog):
         if self.bot.user.avatar:
             embed.set_thumbnail(url=self.bot.user.avatar.url)
         
-        # Image d'ambiance (facultatif, tu peux changer le lien)
-        embed.set_image(url="https://i.imgur.com/G56mB7p.png") # Image style Casino Or
+        # Remplacement de l'image par le GIF 1000004780_4ef1f9.gif
+        embed.set_image(url="https://media.tenor.com/On7yMAn_LpMAAAAC/casino-slot-machine.gif")
 
         await interaction.response.send_message(embed=embed)
 
