@@ -216,7 +216,7 @@ class Jeux(commands.Cog):
         view = CourseView(self, interaction.user, mise)
         await interaction.response.send_message(embed=embed, view=view)
 
-# ==================== PFC DUEL (Version SQLite) ====================
+    # ==================== PFC DUEL (Version SQLite Sécurisée) ====================
     @group.command(name="pfc", description="⚔️ Duel Pierre-Feuille-Ciseaux contre un autre joueur")
     async def pfc(self, interaction: discord.Interaction, adversaire: discord.Member, mise: int):
         if adversaire.id == interaction.user.id or adversaire.bot:
@@ -245,11 +245,15 @@ class Jeux(commands.Cog):
             async def accept(self, i: discord.Interaction, b):
                 if i.user.id != self.p2.id: return await i.response.send_message("❌ Pas pour toi.", ephemeral=True)
                 
-                # Prélèvement des mises
+                # RE-VÉRIFICATION du solde au moment du clic (important !)
+                if self.cog.get_user(self.p1.id) < self.mise or self.cog.get_user(self.p2.id) < self.mise:
+                    return await i.response.edit_message(content="❌ L'un des joueurs n'a plus assez d'argent.", embed=None, view=None)
+
+                # Prélèvement IMMÉDIAT des mises dès que le duel est accepté
                 self.cog.update_money(self.p1.id, -self.mise)
                 self.cog.update_money(self.p2.id, -self.mise)
                 
-                await i.response.edit_message(content="🎮 Le duel commence ! Choisissez votre arme...", embed=None, view=PFCGame(self.cog, self.p1, self.p2, self.mise))
+                await i.response.edit_message(content="🎮 Le duel commence ! Choisissez votre arme (60s)...", embed=None, view=PFCGame(self.cog, self.p1, self.p2, self.mise))
 
             @discord.ui.button(label="Refuser", emoji="🚫", style=discord.ButtonStyle.danger)
             async def deny(self, i: discord.Interaction, b):
@@ -258,9 +262,19 @@ class Jeux(commands.Cog):
 
         class PFCGame(discord.ui.View):
             def __init__(self, cog, p1, p2, mise):
-                super().__init__(timeout=60)
+                super().__init__(timeout=60) # Les joueurs ont 60 secondes pour jouer
                 self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
                 self.choices = {p1.id: None, p2.id: None}
+                self.message = None # Pour pouvoir modifier le message sur timeout
+
+            # EN CAS DE TIMEOUT (Remboursement pour éviter les pertes)
+            async def on_timeout(self):
+                # Si personne ou un seul n'a joué, on rend l'argent
+                if None in self.choices.values():
+                    self.cog.update_money(self.p1.id, self.mise)
+                    self.cog.update_money(self.p2.id, self.mise)
+                    # On ne peut pas facilement edit ici sans interaction, 
+                    # mais l'argent est rendu en base de données.
 
             async def check_results(self, i):
                 c1, c2 = self.choices[self.p1.id], self.choices[self.p2.id]
@@ -270,21 +284,28 @@ class Jeux(commands.Cog):
                     res.description = f"{self.p1.display_name} : **{c1}**\n{self.p2.display_name} : **{c2}**\n\n"
                     
                     if c1 == c2:
+                        # ÉGALITÉ : On rend la mise à chacun
                         self.cog.update_money(self.p1.id, self.mise)
                         self.cog.update_money(self.p2.id, self.mise)
-                        res.title = "🤝 ÉGALITÉ"; res.description += "Les mises sont rendues."
+                        res.title = "🤝 ÉGALITÉ"
+                        res.description += "Les mises sont rendues."
                     elif win_map[c1] == c2:
+                        # P1 GAGNE : Il récupère les 2 mises (Mise * 2)
                         self.cog.update_money(self.p1.id, self.mise * 2)
-                        res.title = f"🏆 {self.p1.display_name} GAGNE !"; res.description += f"Il remporte **{self.cog.fmt(self.mise*2)} €**"
+                        res.title = f"🏆 {self.p1.display_name} GAGNE !"
+                        res.description += f"Il remporte **{self.cog.fmt(self.mise*2)} €**"
                     else:
+                        # P2 GAGNE : Il récupère les 2 mises (Mise * 2)
                         self.cog.update_money(self.p2.id, self.mise * 2)
-                        res.title = f"🏆 {self.p2.display_name} GAGNE !"; res.description += f"Il remporte **{self.cog.fmt(self.mise*2)} €**"
+                        res.title = f"🏆 {self.p2.display_name} GAGNE !"
+                        res.description += f"Il remporte **{self.cog.fmt(self.mise*2)} €**"
                     
                     await i.edit_original_response(embed=res, view=None)
 
             async def make_choice(self, i, choice):
                 if i.user.id not in self.choices: return await i.response.send_message("❌ Pas ton duel.", ephemeral=True)
                 if self.choices[i.user.id]: return await i.response.send_message("✅ Déjà choisi !", ephemeral=True)
+                
                 self.choices[i.user.id] = choice
                 await i.response.send_message(f"Tu as choisi {choice} !", ephemeral=True)
                 await self.check_results(i)
