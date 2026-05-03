@@ -6,6 +6,10 @@ import time
 class Boutique(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        # Configuration des IDs
+        self.ID_ROLE_VIP = 1499809955841310871
+        self.ID_CATEGORIE_CASINO = 1498394439079559318
+
         # --- TES PRIX ET REVENUS ---
         self.entreprises = {
             "Boulangerie": {"prix": 150000, "revenu": 650},
@@ -18,6 +22,20 @@ class Boutique(commands.Cog):
     def cog_unload(self):
         self.recolte_auto.cancel()
 
+    # --- LA BARRIÈRE DE SÉCURITÉ (Bloque VIP + Catégorie) ---
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        user_role_ids = [role.id for role in interaction.user.roles]
+        if self.ID_ROLE_VIP not in user_role_ids:
+            await interaction.response.send_message("🚫 **Accès refusé** : Le rôle VIP est requis pour accéder à la boutique.", ephemeral=True)
+            return False
+
+        current_cat = getattr(interaction.channel, 'category_id', None)
+        if current_cat != self.ID_CATEGORIE_CASINO:
+            await interaction.response.send_message(f"🎰 **Mauvais salon** : La boutique n'est accessible que dans la catégorie <#{self.ID_CATEGORIE_CASINO}>.", ephemeral=True)
+            return False
+
+        return True
+
     def get_user_biens(self, user_id):
         """Récupère l'argent et les entreprises d'un joueur"""
         cursor = self.bot.db.cursor()
@@ -25,12 +43,10 @@ class Boutique(commands.Cog):
         cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
         self.bot.db.commit()
         
-        # On récupère portefeuille, banque et la colonne entreprise (format texte/JSON pour SQLite)
         cursor.execute("SELECT money, banque, entreprises FROM users WHERE user_id = ?", (user_id,))
         row = cursor.fetchone()
         
         import json
-        # On transforme la chaîne de caractères de la base de données en dictionnaire Python
         try:
             ents = json.loads(row[2]) if row[2] else {}
         except:
