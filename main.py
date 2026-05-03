@@ -57,7 +57,7 @@ class MyBot(commands.Bot):
         self.db.commit()
 
     async def setup_hook(self):
-        extensions = ['banque', 'jeux', 'admin', 'autre', 'boutique', 'autres2', 'verification']
+        extensions = ['banque', 'jeux', 'admin', 'autre', 'boutique', 'autres2', 'verification', 'voler']
         for ext in extensions:
             try:
                 await self.load_extension(ext)
