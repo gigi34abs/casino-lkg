@@ -458,6 +458,133 @@ class C4Game(discord.ui.View):
 
         await interaction.response.send_message(embed=embed, view=PFCInvite(self, interaction.user, adversaire, mise))
 
+@group.command(name="pileouface", description="🪙 Tente de doubler ta mise sur un lancer de pièce !")
+    async def pileouface(self, interaction: discord.Interaction, pari: int):
+        # --- VÉRIFICATIONS ---
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(pari, 10, 10000, solde)
+        if err: return await interaction.response.send_message(err, ephemeral=True)
+
+        # --- ACTION : On retire la mise DIRECTEMENT ---
+        self.update_money(interaction.user.id, -pari)
+
+        # On prépare l'embed de choix
+        embed = discord.Embed(
+            title="🪙 PILE OU FACE",
+            description=f"Mise : **{self.fmt(pari)} €**\n\nFais ton choix en cliquant sur un bouton !",
+            color=0xF1C40F
+        )
+        
+        # --- LA VUE AVEC LES BOUTONS ---
+        class PFView(discord.ui.View):
+            def __init__(self, cog, user, pari):
+                super().__init__(timeout=60)
+                self.cog, self.user, self.pari = cog, user, pari
+
+            async def jouer(self, i, choix):
+                if i.user.id != self.user.id: return
+                
+                # Désactive les boutons après le clic
+                for b in self.children: b.disabled = True
+                
+                # Animation
+                await i.response.edit_message(content="🪙 *La pièce tourne...*", embed=None, view=self)
+                await asyncio.sleep(2)
+                
+                # Résultat
+                resultat = random.choice(["pile", "face"])
+                win = (choix == resultat)
+                
+                res_embed = discord.Embed(title="🪙 RÉSULTAT")
+                if win:
+                    gain = self.pari * 2
+                    self.cog.update_money(self.user.id, gain)
+                    res_embed.color = 0x2ECC71
+                    res_embed.description = f"### ✅ C'EST {resultat.upper()} !\n\nBravo ! Tu remportes **{self.cog.fmt(gain)} €** !"
+                else:
+                    res_embed.color = 0xE74C3C
+                    res_embed.description = f"### 💀 C'EST {resultat.upper()}...\n\nPerdu ! Tu perds ta mise de **{self.cog.fmt(self.pari)} €**."
+                
+                await i.edit_original_response(content=None, embed=res_embed, view=None)
+
+            @discord.ui.button(label="PILE", style=discord.ButtonStyle.primary, emoji="🪙")
+            async def pile(self, i, b): await self.jouer(i, "pile")
+
+            @discord.ui.button(label="FACE", style=discord.ButtonStyle.secondary, emoji="👤")
+            async def face(self, i, b): await self.jouer(i, "face")
+
+        await interaction.response.send_message(embed=embed, view=PFView(self, interaction.user, pari))
+
+@group.command(name="portes", description="🚪 Tente de trouver le trésor derrière l'une des 3 portes")
+    async def portes(self, interaction: discord.Interaction, pari: int):
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(pari, 1, 10000, solde)
+        if err: return await interaction.response.send_message(err, ephemeral=True)
+
+        # --- ACTION : On retire la mise DIRECTEMENT ---
+        self.update_money(interaction.user.id, -pari)
+
+        win_door = random.randint(1, 3)
+        
+        embed = discord.Embed(
+            title="🚪 LE JEU DES PORTES", 
+            description=(
+                "Le trésor est caché derrière l'une de ces trois portes...\n"
+                "**Fais le bon choix !** 🍀"
+            ), 
+            color=0x9B59B6
+        )
+        embed.add_field(name="💰 Mise engagée", value=f"**{self.fmt(pari)} €**", inline=True)
+        embed.add_field(name="🏆 Jackpot", value=f"**{self.fmt(pari*3)} €** (x3)", inline=True)
+        embed.set_footer(text="Une seule porte contient l'or, les autres sont vides.")
+
+        class PortesView(discord.ui.View):
+            def __init__(self, cog, win_door, pari, user):
+                super().__init__(timeout=30)
+                self.cog, self.win_door, self.pari, self.user = cog, win_door, pari, user
+
+            async def play(self, i: discord.Interaction, choice: int):
+                if i.user.id != self.user.id: 
+                    return await i.response.send_message("❌ Ce n'est pas ton jeu !", ephemeral=True)
+
+                # Construction du résultat visuel
+                reveil = ""
+                for n in range(1, 4):
+                    if n == self.win_door:
+                        reveil += f"Porte {n} : 💰 **TRÉSOR**"
+                    else:
+                        reveil += f"Porte {n} : 💨 **VIDE**"
+                    
+                    if choice == n:
+                        reveil += " 👈 (Ton choix)"
+                    reveil += "\n"
+
+                res_embed = discord.Embed(description=reveil)
+
+                if choice == self.win_door:
+                    # VICTOIRE : On donne le x3 (Puisqu'on a déjà retiré le pari au début)
+                    gain = self.pari * 3
+                    self.cog.update_money(i.user.id, gain)
+                    res_embed.title = "✨ INCROYABLE VICTOIRE !"
+                    res_embed.color = 0xF1C40F
+                    res_embed.add_field(name="Bilan", value=f"Tu as trouvé l'or ! Gain : **+{self.cog.fmt(gain)} €**")
+                else:
+                    # DÉFAITE : L'argent est déjà perdu (retiré au début)
+                    res_embed.title = "💨 C'EST VIDE..."
+                    res_embed.color = 0xE74C3C
+                    res_embed.add_field(name="Bilan", value=f"Pas de chance ! Perte : **-{self.cog.fmt(self.pari)} €**")
+
+                await i.response.edit_message(embed=res_embed, view=None)
+
+            @discord.ui.button(label="PORTE 1", emoji="🚪", style=discord.ButtonStyle.primary)
+            async def b1(self, i, b): await self.play(i, 1)
+            @discord.ui.button(label="PORTE 2", emoji="🚪", style=discord.ButtonStyle.primary)
+            async def b2(self, i, b): await self.play(i, 2)
+            @discord.ui.button(label="PORTE 3", emoji="🚪", style=discord.ButtonStyle.primary)
+            async def b3(self, i, b): await self.play(i, 3)
+
+        await interaction.response.send_message(embed=embed, view=PortesView(self, win_door, pari, interaction.user))
+
 
 
 # --- TRUCS DE FIN ---
