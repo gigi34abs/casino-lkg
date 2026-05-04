@@ -460,115 +460,146 @@ async def mystere(self, interaction: discord.Interaction, pari: int):
         view=MystereView(self, bc, uc, pari, interaction.user)
             )
 
-@group.command(name="pfc", description="⚔️ Duel en 3 manches (BO3) ! Le premier à 2 victoires rafle tout.")
-    async def pfc(self, interaction: discord.Interaction, adversaire: discord.Member, mise: int):
-        if adversaire.id == interaction.user.id or adversaire.bot:
-            return await interaction.response.send_message("❌ Impossible de se battre soi-même ou un bot.", ephemeral=True)
+# =========================
+# ⚔️ PFC COMPLET
+# =========================
 
-        u1_s, u2_s = self.get_user(interaction.user.id), self.get_user(adversaire.id)
-        err = self.check_mise(mise, 100, 20000, u1_s)
-        if err: return await interaction.response.send_message(err, ephemeral=True)
-        if u2_s < mise: return await interaction.response.send_message(f"❌ {adversaire.mention} est trop pauvre pour ce duel.", ephemeral=True)
+@group.command(name="pfc", description="⚔️ Duel en BO3")
+async def pfc(self, interaction: discord.Interaction, adversaire: discord.Member, mise: int):
+    if adversaire.id == interaction.user.id or adversaire.bot:
+        return await interaction.response.send_message("❌ Impossible.", ephemeral=True)
 
-        embed = discord.Embed(
-            title="⚔️ DÉFI DE DUEL (BO3)", 
-            description=f"{interaction.user.mention} veut t'affronter au PFC !\n💰 Enjeu total : **{self.fmt(mise*2)} €**\n\n*Le premier à 2 points gagne la cagnotte.*", 
-            color=0xF1C40F
-        )
+    u1 = self.get_user(interaction.user.id)
+    u2 = self.get_user(adversaire.id)
 
-        class PFCInvite(discord.ui.View):
-            def __init__(self, cog, p1, p2, mise):
-                super().__init__(timeout=60)
-                self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
+    err = self.check_mise(mise, 100, 20000, u1)
+    if err:
+        return await interaction.response.send_message(err, ephemeral=True)
 
-            @discord.ui.button(label="ACCEPTER", emoji="⚔️", style=discord.ButtonStyle.success)
-            async def accept(self, i: discord.Interaction, b):
-                if i.user.id != self.p2.id: return await i.response.send_message("❌ Ce n'est pas pour toi.", ephemeral=True)
-                
-                # Prélèvement des deux joueurs
-                self.cog.update_money(self.p1.id, -self.mise)
-                self.cog.update_money(self.p2.id, -self.mise)
-                
-                game = PFCGame(self.cog, self.p1, self.p2, self.mise)
-                await i.response.edit_message(content=None, embed=game.make_embed(), view=game)
+    if u2 < mise:
+        return await interaction.response.send_message("❌ L'adversaire n'a pas assez.", ephemeral=True)
 
-            @discord.ui.button(label="REFUSER", emoji="🚫", style=discord.ButtonStyle.danger)
-            async def deny(self, i: discord.Interaction, b):
-                if i.user.id != self.p2.id: return await i.response.send_message("❌ Ce n'est pas pour toi.", ephemeral=True)
-                await i.response.edit_message(content="🛡️ Duel décliné.", embed=None, view=None)
+    embed = discord.Embed(
+        title="⚔️ Duel PFC",
+        description=f"{interaction.user.mention} vs {adversaire.mention}\n💰 {self.fmt(mise*2)} €",
+        color=0xF1C40F
+    )
 
-        class PFCGame(discord.ui.View):
-            def __init__(self, cog, p1, p2, mise):
-                super().__init__(timeout=120)
-                self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
-                self.scores = {p1.id: 0, p2.id: 0}
-                self.choices = {p1.id: None, p2.id: None}
-                self.manche = 1
-                self.logs = "En attente des choix..."
-                self.emojis = {"pierre": "🪨", "feuille": "🍃", "ciseaux": "✂️"}
+    class PFCView(discord.ui.View):
+        def __init__(self, cog, p1, p2, mise):
+            super().__init__(timeout=120)
+            self.cog, self.p1, self.p2, self.mise = cog, p1, p2, mise
+            self.scores = {p1.id: 0, p2.id: 0}
+            self.choices = {}
 
-            def make_embed(self):
-                embed = discord.Embed(title=f"⚔️ DUEL : MANCHE {self.manche}", color=0x5865F2)
-                embed.add_field(name=f"🔴 {self.p1.display_name}", value=f"Score : **{self.scores[self.p1.id]}**", inline=True)
-                embed.add_field(name=f"🟡 {self.p2.display_name}", value=f"Score : **{self.scores[self.p2.id]}**", inline=True)
-                
-                status_p1 = "✅ PRÊT" if self.choices[self.p1.id] else "⏳ CHOISIT..."
-                status_p2 = "✅ PRÊT" if self.choices[self.p2.id] else "⏳ CHOISIT..."
-                
-                embed.add_field(name="État des joueurs", value=f"{self.p1.mention} : {status_p1}\n{self.p2.mention} : {status_p2}", inline=False)
-                embed.add_field(name="Dernier round", value=self.logs, inline=False)
-                embed.set_footer(text="Premier à 2 points ! En cas d'égalité, on rejoue la manche.")
-                return embed
+        async def play(self, i, choix):
+            if i.user.id not in [self.p1.id, self.p2.id]:
+                return
 
-            async def check_round(self, i):
-                c1, c2 = self.choices[self.p1.id], self.choices[self.p2.id]
-                if c1 and c2:
-                    win_map = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
-                    
-                    if c1 == c2:
-                        self.logs = f"🤝 Égalité (**{self.emojis[c1]}**)! On refait la manche {self.manche}."
-                    elif win_map[c1] == c2:
-                        self.scores[self.p1.id] += 1
-                        self.logs = f"✅ **{self.p1.display_name}** gagne la manche ({self.emojis[c1]} bat {self.emojis[c2]})"
-                        self.manche += 1
-                    else:
-                        self.scores[self.p2.id] += 1
-                        self.logs = f"✅ **{self.p2.display_name}** gagne la manche ({self.emojis[c2]} bat {self.emojis[c1]})"
-                        self.manche += 1
+            if i.user.id in self.choices:
+                return await i.response.send_message("❌ Déjà joué.", ephemeral=True)
 
-                    # Reset des choix pour la suite
-                    self.choices[self.p1.id] = None
-                    self.choices[self.p2.id] = None
+            self.choices[i.user.id] = choix
+            await i.response.send_message("✅ Choix enregistré", ephemeral=True)
 
-                    # Vérif si un gagnant final
-                    if self.scores[self.p1.id] == 2 or self.scores[self.p2.id] == 2:
-                        winner = self.p1 if self.scores[self.p1.id] == 2 else self.p2
-                        gain = self.mise * 2
-                        self.cog.update_money(winner.id, gain)
-                        
-                        final_emb = discord.Embed(title="🏆 VICTOIRE FINALE !", description=f"{winner.mention} remporte le duel **{max(self.scores.values())} - {min(self.scores.values())}** !\n💰 Gain : **{self.cog.fmt(gain)} €**", color=0x2ECC71)
-                        return await i.edit_original_response(embed=final_emb, view=None)
+            if len(self.choices) == 2:
+                c1 = self.choices[self.p1.id]
+                c2 = self.choices[self.p2.id]
 
-                    await i.edit_original_response(embed=self.make_embed())
+                win_map = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
 
-            async def handle_play(self, i, choice):
-                if i.user.id not in [self.p1.id, self.p2.id]: 
-                    return await i.response.send_message("❌ Tu ne joues pas !", ephemeral=True)
-                if self.choices[i.user.id]: 
-                    return await i.response.send_message("✅ Tu as déjà fait ton choix, attends l'autre !", ephemeral=True)
-                
-                self.choices[i.user.id] = choice
-                await i.response.send_message(f"Tu as joué {self.emojis[choice]} ! Chut, c'est secret...", ephemeral=True)
-                await self.check_round(i)
+                if c1 != c2:
+                    winner = self.p1 if win_map[c1] == c2 else self.p2
+                    self.scores[winner.id] += 1
 
-            @discord.ui.button(label="Pierre", emoji="🪨", style=discord.ButtonStyle.secondary)
-            async def rock(self, i, b): await self.handle_play(i, "pierre")
-            @discord.ui.button(label="Feuille", emoji="🍃", style=discord.ButtonStyle.secondary)
-            async def paper(self, i, b): await self.handle_play(i, "feuille")
-            @discord.ui.button(label="Ciseaux", emoji="✂️", style=discord.ButtonStyle.secondary)
-            async def scissors(self, i, b): await self.handle_play(i, "ciseaux")
+                self.choices = {}
 
-        await interaction.response.send_message(embed=embed, view=PFCInvite(self, interaction.user, adversaire, mise))
+                if max(self.scores.values()) == 2:
+                    gagnant = max(self.scores, key=self.scores.get)
+                    gagnant_user = self.p1 if gagnant == self.p1.id else self.p2
+
+                    gain = self.mise * 2
+                    self.cog.update_money(gagnant_user.id, gain)
+
+                    self.clear_items()
+
+                    return await i.edit_original_response(
+                        embed=discord.Embed(
+                            title="🏆 VICTOIRE",
+                            description=f"{gagnant_user.mention} gagne {self.cog.fmt(gain)} €"
+                        ),
+                        view=None
+                    )
+
+        @discord.ui.button(label="Pierre")
+        async def pierre(self, i, b): await self.play(i, "pierre")
+
+        @discord.ui.button(label="Feuille")
+        async def feuille(self, i, b): await self.play(i, "feuille")
+
+        @discord.ui.button(label="Ciseaux")
+        async def ciseaux(self, i, b): await self.play(i, "ciseaux")
+
+    # paiement
+    self.update_money(interaction.user.id, -mise)
+    self.update_money(adversaire.id, -mise)
+
+    await interaction.response.send_message(embed=embed, view=PFCView(self, interaction.user, adversaire, mise))
+
+# =========================
+# 🪙 PILE OU FACE COMPLET
+# =========================
+
+@group.command(name="pileouface", description="🪙 Double ta mise")
+async def pileouface(self, interaction: discord.Interaction, pari: int):
+    solde = self.get_user(interaction.user.id)
+
+    err = self.check_mise(pari, 10, 10000, solde)
+    if err:
+        return await interaction.response.send_message(err, ephemeral=True)
+
+    self.update_money(interaction.user.id, -pari)
+
+    class PFView(discord.ui.View):
+        def __init__(self, cog, user, pari):
+            super().__init__(timeout=30)
+            self.cog, self.user, self.pari = cog, user, pari
+            self.done = False
+
+        async def play(self, i, choix):
+            if self.done:
+                return
+
+            if i.user.id != self.user.id:
+                return
+
+            self.done = True
+            self.clear_items()
+
+            res = random.choice(["pile", "face"])
+            win = res == choix
+
+            embed = discord.Embed(title="🪙 Résultat")
+
+            if win:
+                gain = self.pari * 2
+                self.cog.update_money(self.user.id, gain)
+                embed.description = f"✅ {res.upper()} ! +{self.cog.fmt(gain)} €"
+            else:
+                embed.description = f"💀 {res.upper()} ! Perdu."
+
+            await i.response.edit_message(embed=embed, view=None)
+
+        @discord.ui.button(label="PILE")
+        async def pile(self, i, b): await self.play(i, "pile")
+
+        @discord.ui.button(label="FACE")
+        async def face(self, i, b): await self.play(i, "face")
+
+    await interaction.response.send_message(
+        embed=discord.Embed(title="🪙 Pile ou Face"),
+        view=PFView(self, interaction.user, pari)
+    )
 
 @group.command(name="pileouface", description="🪙 Tente de doubler ta mise sur un lancer de pièce !")
     async def pileouface(self, interaction: discord.Interaction, pari: int):
