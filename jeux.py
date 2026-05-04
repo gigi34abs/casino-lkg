@@ -449,7 +449,7 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=PFView(self, pari))
 
-# ==================== CONNECTE 4 (ZÉRO BUG D'AFFICHAGE) ====================
+# ==================== CONNECTE 4 (FIN DU CODE) ====================
     @group.command(name="connecte4", description="🔴 Duel Puissance 4 avec mise")
     async def connecte4(self, interaction: discord.Interaction, adversaire: discord.Member, mise: int):
         if adversaire.id == interaction.user.id or adversaire.bot:
@@ -457,11 +457,9 @@ class Jeux(commands.Cog):
 
         u1_solde = self.get_user(interaction.user.id)
         if u1_solde < mise: return await interaction.response.send_message(f"❌ Solde insuffisant.", ephemeral=True)
-
         u2_solde = self.get_user(adversaire.id)
         if u2_solde < mise: return await interaction.response.send_message(f"❌ L'adversaire n'a pas assez d'argent.", ephemeral=True)
 
-        # Invitation propre en Embed
         embed_inv = discord.Embed(
             title="🎮 DÉFI PUISSANCE 4",
             description=f"🔴 {interaction.user.mention} défie 🟡 {adversaire.mention}\n💰 Mise : **{self.fmt(mise)} €**",
@@ -477,11 +475,10 @@ class Jeux(commands.Cog):
             async def accept(self, i: discord.Interaction, b):
                 if i.user.id != self.p2.id: return await i.response.send_message("❌ Pas pour toi.", ephemeral=True)
                 
-                # Sécurité Argent
+                # On retire l'argent dès l'acceptation
                 self.cog.update_money(self.p1.id, -self.mise)
                 self.cog.update_money(self.p2.id, -self.mise)
                 
-                # Chargement immédiat du jeu
                 game = C4Game(self.cog, self.p1, self.p2, self.mise)
                 await i.response.edit_message(content=None, embed=game.make_embed(), view=game)
 
@@ -492,6 +489,8 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed_inv, view=C4Invite(self, interaction.user, adversaire, mise))
 
+# --- CLASSES DE JEU ET SETUP (HORS DE LA CLASSE JEUX) ---
+
 class C4Game(discord.ui.View):
     def __init__(self, cog, p1, p2, mise):
         super().__init__(timeout=300)
@@ -501,47 +500,38 @@ class C4Game(discord.ui.View):
         self.symbols = {0: "⚪", 1: "🔴", 2: "🟡"}
 
     def make_embed(self, title="🎮 MATCH EN COURS"):
-        # Cette partie construit le plateau SANS bug d'alignement
         board_text = ""
         for row in self.board:
             board_text += "".join([self.symbols[cell] for cell in row]) + "\n"
         board_text += "1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣ 6️⃣ 7️⃣"
 
         e = discord.Embed(title=title, color=0x3498DB)
-        # On affiche les joueurs et le tour actuel
         e.description = f"🔴 {self.p1.mention} vs 🟡 {self.p2.mention}\n\n{board_text}\n\nTour de : **{self.turn.display_name}**"
         return e
 
     async def play(self, i: discord.Interaction, col):
         if i.user.id != self.turn.id: return await i.response.send_message("❌ Pas ton tour !", ephemeral=True)
         
-        row_placed = -1
         for r in range(5, -1, -1):
             if self.board[r][col] == 0:
                 self.board[r][col] = 1 if self.turn == self.p1 else 2
-                row_placed = r
                 break
-        
-        if row_placed == -1: return await i.response.send_message("❌ Colonne pleine !", ephemeral=True)
+        else: return await i.response.send_message("❌ Colonne pleine !", ephemeral=True)
 
-        # Vérification Victoire
         p_val = 1 if self.turn == self.p1 else 2
         if self.check_win(p_val):
             self.cog.update_money(self.turn.id, self.mise * 2)
-            return await i.response.edit_message(embed=self.make_embed(title=f"🏆 {self.turn.display_name} A GAGNÉ !"), view=None)
+            return await i.response.edit_message(embed=self.make_embed(title=f"🏆 {self.turn.display_name} GAGNE !"), view=None)
 
-        # Vérification Égalité
         if all(self.board[0][c] != 0 for c in range(7)):
             self.cog.update_money(self.p1.id, self.mise)
             self.cog.update_money(self.p2.id, self.mise)
             return await i.response.edit_message(embed=self.make_embed(title="🤝 ÉGALITÉ"), view=None)
 
-        # Changement de tour et refresh immédiat
         self.turn = self.p2 if self.turn == self.p1 else self.p1
         await i.response.edit_message(embed=self.make_embed())
 
     def check_win(self, p):
-        # Logique de victoire standard (Horizontal, Vertical, Diagonales)
         for r in range(6):
             for c in range(4):
                 if all(self.board[r][c+i] == p for i in range(4)): return True
@@ -556,7 +546,6 @@ class C4Game(discord.ui.View):
                 if all(self.board[r+i][c+i] == p for i in range(4)): return True
         return False
 
-    # Boutons de 1 à 7
     @discord.ui.button(label="1", style=discord.ButtonStyle.blurple)
     async def b1(self, i, b): await self.play(i, 0)
     @discord.ui.button(label="2", style=discord.ButtonStyle.blurple)
@@ -572,7 +561,6 @@ class C4Game(discord.ui.View):
     @discord.ui.button(label="7", style=discord.ButtonStyle.blurple)
     async def b7(self, i, b): await self.play(i, 6)
 
-        await interaction.response.send_message(embed=embed, view=C4Invite(self, interaction.user, adversaire, mise))
-
+# --- TRUCS DE FIN ---
 async def setup(bot):
     await bot.add_cog(Jeux(bot))
