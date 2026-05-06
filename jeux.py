@@ -181,3 +181,159 @@ class Jeux(commands.Cog):
                 await self.play(i, "bas")
 
         await interaction.response.send_message(embed=embed, view=MystereView(self, interaction.user))
+
+# =========================
+# 🚪 PORTES (ULTRA CLEAN)
+# =========================
+
+    @jeux.command(name="portes", description="🚪 Trouve la bonne porte")
+    async def portes(self, interaction: discord.Interaction, mise: int):
+
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(mise, 10, 5000, solde)
+
+        if err:
+            return await interaction.response.send_message(err, ephemeral=True)
+
+        self.update_money(interaction.user.id, -mise)
+
+        bonne_porte = random.randint(1, 3)
+
+        embed = discord.Embed(
+            title="🚪 CHOISIS UNE PORTE",
+            description="Derrière une porte se cache un trésor... les autres = 💀",
+            color=0xE67E22
+        )
+
+        embed.add_field(name="💰 Mise", value=f"{self.fmt(mise)} €")
+        embed.add_field(name="🎯 Gain", value=f"{self.fmt(mise*3)} €")
+
+        class PortesView(discord.ui.View):
+            def __init__(self, cog, user):
+                super().__init__(timeout=30)
+                self.cog = cog
+                self.user = user
+                self.done = False
+
+            async def choisir(self, i, choix):
+                if self.done:
+                    return
+
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Pas ton jeu.", ephemeral=True)
+
+                self.done = True
+                self.clear_items()
+
+                embed = discord.Embed(title="🚪 RÉSULTAT")
+
+                if choix == bonne_porte:
+                    gain = mise * 3
+                    self.cog.update_money(self.user.id, gain)
+
+                    embed.description = f"🎉 Bonne porte ! (+{gain} €)"
+                    embed.color = 0x2ECC71
+                else:
+                    embed.description = f"💀 Mauvaise porte...\nLa bonne était : {bonne_porte}"
+                    embed.color = 0xE74C3C
+
+                await i.response.edit_message(embed=embed, view=None)
+
+            @discord.ui.button(label="Porte 1", emoji="🚪")
+            async def p1(self, i, b):
+                await self.choisir(i, 1)
+
+            @discord.ui.button(label="Porte 2", emoji="🚪")
+            async def p2(self, i, b):
+                await self.choisir(i, 2)
+
+            @discord.ui.button(label="Porte 3", emoji="🚪")
+            async def p3(self, i, b):
+                await self.choisir(i, 3)
+
+        await interaction.response.send_message(embed=embed, view=PortesView(self, interaction.user))
+
+
+# =========================
+# ☢️ RISQUE (PROGRESSION)
+# =========================
+
+    @jeux.command(name="risque", description="☢️ Monte les niveaux sans exploser")
+    async def risque(self, interaction: discord.Interaction, mise: int):
+
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(mise, 50, 5000, solde)
+
+        if err:
+            return await interaction.response.send_message(err, ephemeral=True)
+
+        self.update_money(interaction.user.id, -mise)
+
+        embed = discord.Embed(
+            title="☢️ JEU DU RISQUE",
+            description="Clique pour monter les niveaux...\nMais attention à la bombe 💣",
+            color=0xC0392B
+        )
+
+        embed.add_field(name="💰 Mise", value=f"{self.fmt(mise)} €")
+
+        class RiskView(discord.ui.View):
+            def __init__(self, cog, user):
+                super().__init__(timeout=60)
+                self.cog = cog
+                self.user = user
+                self.level = 1
+                self.gain = mise
+
+            async def jouer(self, i):
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Pas ton jeu.", ephemeral=True)
+
+                # chance de perdre
+                if random.randint(1, 4) == 1:
+                    self.clear_items()
+                    return await i.response.edit_message(
+                        embed=discord.Embed(
+                            title="💥 BOOM !",
+                            description="Tu as tout perdu...",
+                            color=0xE74C3C
+                        ),
+                        view=None
+                    )
+
+                # gagne
+                self.level += 1
+                self.gain = int(self.gain * 1.5)
+
+                embed = discord.Embed(
+                    title="☢️ RISQUE",
+                    description=f"✅ Niveau {self.level}\n💰 Gain actuel : {self.gain} €",
+                    color=0x2ECC71
+                )
+
+                await i.response.edit_message(embed=embed, view=self)
+
+            @discord.ui.button(label="🎲 Continuer", style=discord.ButtonStyle.primary)
+            async def continuer(self, i, b):
+                await self.jouer(i)
+
+            @discord.ui.button(label="💰 Encaisser", style=discord.ButtonStyle.success)
+            async def cashout(self, i, b):
+                if i.user.id != self.user.id:
+                    return
+
+                self.cog.update_money(self.user.id, self.gain)
+                self.clear_items()
+
+                await i.response.edit_message(
+                    embed=discord.Embed(
+                        title="💰 CASHOUT",
+                        description=f"Tu repars avec {self.gain} €",
+                        color=0xF1C40F
+                    ),
+                    view=None
+                )
+
+        await interaction.response.send_message(embed=embed, view=RiskView(self, interaction.user))
+
+
