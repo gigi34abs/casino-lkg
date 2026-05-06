@@ -529,3 +529,96 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=PFCJoin(self))
 
+# =========================
+# 🃏 UNO (VERSION LONGUE)
+# =========================
+
+    @jeux.command(name="uno", description="🃏 Jeu UNO (équipe)")
+    async def uno(self, interaction: discord.Interaction):
+
+        joueurs = []
+        equipes = {"bleu": [], "orange": []}
+
+        class JoinView(discord.ui.View):
+            def __init__(self, cog):
+                super().__init__(timeout=60)
+                self.cog = cog
+
+            @discord.ui.button(label="🔵 Équipe Bleue", style=discord.ButtonStyle.primary)
+            async def bleu(self, i, b):
+                if i.user in joueurs:
+                    return await i.response.send_message("❌ Déjà dans une équipe", ephemeral=True)
+
+                joueurs.append(i.user)
+                equipes["bleu"].append(i.user)
+
+                await i.response.send_message("🔵 Rejoint équipe Bleue", ephemeral=True)
+
+            @discord.ui.button(label="🟠 Équipe Orange", style=discord.ButtonStyle.secondary)
+            async def orange(self, i, b):
+                if i.user in joueurs:
+                    return await i.response.send_message("❌ Déjà dans une équipe", ephemeral=True)
+
+                joueurs.append(i.user)
+                equipes["orange"].append(i.user)
+
+                await i.response.send_message("🟠 Rejoint équipe Orange", ephemeral=True)
+
+            @discord.ui.button(label="🚀 Lancer", style=discord.ButtonStyle.success)
+            async def start(self, i, b):
+                if i.user != interaction.user:
+                    return
+
+                if len(joueurs) < 2:
+                    return await i.response.send_message("❌ Pas assez de joueurs", ephemeral=True)
+
+                self.clear_items()
+
+                score_bleu = 0
+                score_orange = 0
+
+                for tour in range(1, 8):
+                    await asyncio.sleep(1)
+
+                    gagnant_tour = random.choice(["bleu", "orange"])
+
+                    if gagnant_tour == "bleu":
+                        score_bleu += 1
+                    else:
+                        score_orange += 1
+
+                    txt = (
+                        f"🃏 **UNO - TOUR {tour}**\n\n"
+                        f"🔵 Bleu : {score_bleu}\n"
+                        f"🟠 Orange : {score_orange}\n\n"
+                        f"🎯 Manche gagnée : {gagnant_tour.upper()}"
+                    )
+
+                    await interaction.edit_original_response(content=txt)
+
+                gagnant = "bleu" if score_bleu > score_orange else "orange"
+
+                txt_final = (
+                    "🏆 **UNO ! VICTOIRE FINALE !**\n\n"
+                    f"🔥 L'équipe **{gagnant.upper()}** écrase la partie\n"
+                    "💥 Dernière carte posée avec style\n\n"
+                    "💰 GG à tous les joueurs !"
+                )
+
+                await interaction.edit_original_response(content=txt_final)
+
+        embed = discord.Embed(
+            title="🃏 UNO",
+            description="Choisis ton équipe pour commencer",
+            color=0xF39C12
+        )
+
+        await interaction.response.send_message(embed=embed, view=JoinView(self))
+
+
+# =========================
+# 🔧 SETUP FINAL
+# =========================
+
+async def setup(bot):
+    await bot.add_cog(Jeux(bot))
