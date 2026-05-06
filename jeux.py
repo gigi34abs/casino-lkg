@@ -9,12 +9,17 @@ class Jeux(commands.Cog):
         self.bot = bot
         self.data = {}
 
-        # 🔥 TRÈS IMPORTANT
+        # IMPORTANT
         self.bot.tree.add_command(self.jeux)
 
-    # ===== ARGENT =====
+    # =========================
+    # 💰 SYSTÈME ARGENT
+    # =========================
+
     def get_user(self, user_id):
-        return self.data.get(user_id, 1000)
+        if user_id not in self.data:
+            self.data[user_id] = 1000
+        return self.data[user_id]
 
     def update_money(self, user_id, amount):
         self.data[user_id] = self.get_user(user_id) + amount
@@ -24,76 +29,95 @@ class Jeux(commands.Cog):
 
     def check_mise(self, mise, minv, maxv, solde):
         if mise < minv:
-            return f"❌ Mise min : {minv}"
+            return f"❌ Mise minimum : {minv} €"
         if mise > maxv:
-            return f"❌ Mise max : {maxv}"
+            return f"❌ Mise maximum : {maxv} €"
         if solde < mise:
-            return "❌ Pas assez d'argent"
+            return "❌ Tu n'as pas assez d'argent"
         return None
 
     # =========================
-    # 🎮 GROUPE /jeux
+    # 🎮 GROUPE
     # =========================
 
-    jeux = app_commands.Group(name="jeux", description="🎮 Jeux casino")
+    jeux = app_commands.Group(name="jeux", description="🎮 Jeux du casino")
 
 # =========================
-# 🪙 PILE OU FACE
+# 🪙 PILE OU FACE (ULTRA CLEAN)
 # =========================
 
-    @jeux.command(name="pileouface")
+    @jeux.command(name="pileouface", description="🪙 Double ou rien")
     async def pileouface(self, interaction: discord.Interaction, mise: int):
 
         solde = self.get_user(interaction.user.id)
-        err = self.check_mise(mise, 10, 10000, solde)
+        err = self.check_mise(mise, 10, 20000, solde)
 
         if err:
             return await interaction.response.send_message(err, ephemeral=True)
 
         self.update_money(interaction.user.id, -mise)
 
-        class View(discord.ui.View):
+        embed = discord.Embed(
+            title="🪙 PILE OU FACE",
+            description="Choisis ton camp 👇",
+            color=0x3498DB
+        )
+
+        embed.add_field(name="💰 Mise", value=f"{self.fmt(mise)} €")
+        embed.add_field(name="🎯 Gain possible", value=f"{self.fmt(mise*2)} €")
+
+        class PFView(discord.ui.View):
             def __init__(self, cog, user):
                 super().__init__(timeout=30)
-                self.cog, self.user = cog, user
-                self.done = False
+                self.cog = cog
+                self.user = user
+                self.played = False
 
             async def play(self, i, choix):
-                if self.done or i.user != self.user:
+                if self.played:
                     return
 
-                self.done = True
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Ce n'est pas ton jeu.", ephemeral=True)
+
+                self.played = True
                 self.clear_items()
 
                 res = random.choice(["pile", "face"])
+                embed = discord.Embed(title="🪙 RÉSULTAT")
 
                 if res == choix:
                     gain = mise * 2
                     self.cog.update_money(self.user.id, gain)
-                    txt = f"✅ {res.upper()} → +{gain}€"
+
+                    embed.description = f"✅ **{res.upper()} !** Tu gagnes {self.cog.fmt(gain)} €"
+                    embed.color = 0x2ECC71
                 else:
-                    txt = f"💀 {res.upper()} → perdu"
+                    embed.description = f"💀 **{res.upper()} !** Tu perds ta mise"
+                    embed.color = 0xE74C3C
 
-                await i.response.edit_message(content=txt, view=None)
+                await i.response.edit_message(embed=embed, view=None)
 
-            @discord.ui.button(label="PILE")
-            async def pile(self, i, b): await self.play(i, "pile")
+            @discord.ui.button(label="PILE", emoji="🪙", style=discord.ButtonStyle.primary)
+            async def pile(self, i, b):
+                await self.play(i, "pile")
 
-            @discord.ui.button(label="FACE")
-            async def face(self, i, b): await self.play(i, "face")
+            @discord.ui.button(label="FACE", emoji="🎯", style=discord.ButtonStyle.secondary)
+            async def face(self, i, b):
+                await self.play(i, "face")
 
-        await interaction.response.send_message("🪙 Choisis :", view=View(self, interaction.user))
+        await interaction.response.send_message(embed=embed, view=PFView(self, interaction.user))
 
 
 # =========================
-# 🔢 MYSTERE
+# 🔢 MYSTÈRE (ULTRA CLEAN)
 # =========================
 
-    @jeux.command(name="mystere")
+    @jeux.command(name="mystere", description="🔢 Plus haut ou plus bas")
     async def mystere(self, interaction: discord.Interaction, mise: int):
 
         solde = self.get_user(interaction.user.id)
-        err = self.check_mise(mise, 1, 2500, solde)
+        err = self.check_mise(mise, 1, 5000, solde)
 
         if err:
             return await interaction.response.send_message(err, ephemeral=True)
@@ -106,88 +130,54 @@ class Jeux(commands.Cog):
         while uc == bc:
             uc = random.randint(1, 14)
 
-        class View(discord.ui.View):
-            def __init__(self, cog):
+        embed = discord.Embed(
+            title="🔢 JEU MYSTÈRE",
+            description=f"La banque a tiré : **{bc}**\n\nTon nombre est caché...\nPlus haut ou plus bas ?",
+            color=0x9B59B6
+        )
+
+        embed.add_field(name="💰 Mise", value=f"{self.fmt(mise)} €")
+        embed.add_field(name="🎯 Gain", value=f"{self.fmt(mise*2)} €")
+
+        class MystereView(discord.ui.View):
+            def __init__(self, cog, user):
                 super().__init__(timeout=30)
                 self.cog = cog
+                self.user = user
+                self.played = False
 
             async def play(self, i, choix):
-                if i.user.id != interaction.user.id:
+                if self.played:
                     return
 
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Pas ton jeu.", ephemeral=True)
+
+                self.played = True
                 self.clear_items()
 
                 win = (choix == "haut" and uc > bc) or (choix == "bas" and uc < bc)
 
+                embed = discord.Embed(title="🔢 RÉSULTAT")
+
                 if win:
                     gain = mise * 2
-                    self.cog.update_money(i.user.id, gain)
-                    txt = f"✅ {uc}>{bc} → +{gain}€"
+                    self.cog.update_money(self.user.id, gain)
+
+                    embed.description = f"✅ {uc} vs {bc}\nTu gagnes {gain} €"
+                    embed.color = 0x2ECC71
                 else:
-                    txt = f"💀 {uc} vs {bc} → perdu"
+                    embed.description = f"💀 {uc} vs {bc}\nPerdu"
+                    embed.color = 0xE74C3C
 
-                await i.response.edit_message(content=txt, view=None)
+                await i.response.edit_message(embed=embed, view=None)
 
-            @discord.ui.button(label="HAUT")
-            async def h(self, i, b): await self.play(i, "haut")
+            @discord.ui.button(label="PLUS HAUT", emoji="⬆️", style=discord.ButtonStyle.success)
+            async def haut(self, i, b):
+                await self.play(i, "haut")
 
-            @discord.ui.button(label="BAS")
-            async def b(self, i, b): await self.play(i, "bas")
+            @discord.ui.button(label="PLUS BAS", emoji="⬇️", style=discord.ButtonStyle.danger)
+            async def bas(self, i, b):
+                await self.play(i, "bas")
 
-        await interaction.response.send_message(f"🔢 Banque : {bc}", view=View(self))
-
-
-# =========================
-# 🚪 PORTES
-# =========================
-
-    @jeux.command(name="portes")
-    async def portes(self, interaction: discord.Interaction, mise: int):
-
-        solde = self.get_user(interaction.user.id)
-        err = self.check_mise(mise, 1, 5000, solde)
-
-        if err:
-            return await interaction.response.send_message(err, ephemeral=True)
-
-        self.update_money(interaction.user.id, -mise)
-        win = random.randint(1, 3)
-
-        class View(discord.ui.View):
-            def __init__(self, cog):
-                super().__init__(timeout=30)
-                self.cog = cog
-
-            async def choose(self, i, choix):
-                if i.user.id != interaction.user.id:
-                    return
-
-                self.clear_items()
-
-                if choix == win:
-                    gain = mise * 3
-                    self.cog.update_money(i.user.id, gain)
-                    txt = f"💰 Gagné {gain}€"
-                else:
-                    txt = "💀 Perdu"
-
-                await i.response.edit_message(content=txt, view=None)
-
-            @discord.ui.button(label="1")
-            async def b1(self, i, b): await self.choose(i, 1)
-
-            @discord.ui.button(label="2")
-            async def b2(self, i, b): await self.choose(i, 2)
-
-            @discord.ui.button(label="3")
-            async def b3(self, i, b): await self.choose(i, 3)
-
-        await interaction.response.send_message("🚪 Choisis une porte", view=View(self))
-
-
-# =========================
-# 🔧 SETUP
-# =========================
-
-async def setup(bot):
-    await bot.add_cog(Jeux(bot))
+        await interaction.response.send_message(embed=embed, view=MystereView(self, interaction.user))
