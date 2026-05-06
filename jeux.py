@@ -336,4 +336,196 @@ class Jeux(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=RiskView(self, interaction.user))
 
+# =========================
+# 🏇 COURSE (ANIMÉE)
+# =========================
+
+    @jeux.command(name="course", description="🏇 Course entre joueurs")
+    async def course(self, interaction: discord.Interaction, mise: int):
+
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(mise, 50, 5000, solde)
+
+        if err:
+            return await interaction.response.send_message(err, ephemeral=True)
+
+        joueurs = [interaction.user]
+
+        class CourseView(discord.ui.View):
+            def __init__(self, cog):
+                super().__init__(timeout=30)
+                self.cog = cog
+
+            @discord.ui.button(label="➕ Rejoindre", style=discord.ButtonStyle.success)
+            async def join(self, i, b):
+                if i.user in joueurs:
+                    return await i.response.send_message("❌ Déjà dans la course", ephemeral=True)
+
+                if self.cog.get_user(i.user.id) < mise:
+                    return await i.response.send_message("❌ Pas assez d'argent", ephemeral=True)
+
+                joueurs.append(i.user)
+                await i.response.send_message("✅ Tu rejoins la course !", ephemeral=True)
+
+            @discord.ui.button(label="🚀 Lancer", style=discord.ButtonStyle.primary)
+            async def start(self, i, b):
+                if i.user != interaction.user:
+                    return
+
+                # retirer l'argent
+                for p in joueurs:
+                    self.cog.update_money(p.id, -mise)
+
+                positions = {p: 0 for p in joueurs}
+
+                msg = ""
+
+                for tour in range(8):
+                    msg = "🏇 **COURSE EN COURS**\n\n"
+
+                    for p in positions:
+                        positions[p] += random.randint(1, 3)
+                        bar = "🐎" * positions[p]
+                        msg += f"{p.display_name} : {bar}\n"
+
+                    await i.response.edit_message(content=msg, view=None) if tour == 0 else await interaction.edit_original_response(content=msg)
+                    await asyncio.sleep(1)
+
+                gagnant = max(positions, key=positions.get)
+                gain = mise * len(joueurs)
+
+                self.cog.update_money(gagnant.id, gain)
+
+                await interaction.edit_original_response(
+                    content=f"🏆 {gagnant.mention} gagne la course !\n💰 Gain : {gain} €"
+                )
+
+        embed = discord.Embed(
+            title="🏇 COURSE",
+            description="Clique pour rejoindre puis lance !",
+            color=0x1ABC9C
+        )
+
+        embed.add_field(name="💰 Mise", value=f"{self.fmt(mise)} €")
+
+        await interaction.response.send_message(embed=embed, view=CourseView(self))
+
+
+# =========================
+# ⚔️ PFC (DUEL BO3)
+# =========================
+
+    @jeux.command(name="pfc", description="⚔️ Pierre Feuille Ciseaux (BO3)")
+    async def pfc(self, interaction: discord.Interaction, mise: int):
+
+        solde = self.get_user(interaction.user.id)
+        err = self.check_mise(mise, 10, 5000, solde)
+
+        if err:
+            return await interaction.response.send_message(err, ephemeral=True)
+
+        joueurs = [interaction.user]
+
+        class PFCJoin(discord.ui.View):
+            def __init__(self, cog):
+                super().__init__(timeout=30)
+                self.cog = cog
+
+            @discord.ui.button(label="⚔️ Rejoindre", style=discord.ButtonStyle.success)
+            async def join(self, i, b):
+                if i.user == interaction.user:
+                    return
+
+                if len(joueurs) >= 2:
+                    return await i.response.send_message("❌ Déjà 2 joueurs", ephemeral=True)
+
+                if self.cog.get_user(i.user.id) < mise:
+                    return await i.response.send_message("❌ Pas assez d'argent", ephemeral=True)
+
+                joueurs.append(i.user)
+
+                await i.response.send_message("✅ Duel accepté", ephemeral=True)
+
+                # retirer argent
+                for p in joueurs:
+                    self.cog.update_money(p.id, -mise)
+
+                await interaction.edit_original_response(
+                    content=f"⚔️ Duel entre {joueurs[0].mention} et {joueurs[1].mention}",
+                    view=PFCGame(self.cog)
+                )
+
+        class PFCGame(discord.ui.View):
+            def __init__(self, cog):
+                super().__init__(timeout=60)
+                self.cog = cog
+                self.choices = {}
+                self.score = {joueurs[0]: 0, joueurs[1]: 0}
+
+            async def check_round(self, i):
+                if len(self.choices) < 2:
+                    return
+
+                p1, p2 = joueurs
+                c1 = self.choices[p1]
+                c2 = self.choices[p2]
+
+                result = ""
+
+                if c1 == c2:
+                    result = "🤝 Égalité"
+                elif (c1 == "pierre" and c2 == "ciseaux") or (c1 == "feuille" and c2 == "pierre") or (c1 == "ciseaux" and c2 == "feuille"):
+                    self.score[p1] += 1
+                    result = f"🏆 {p1.display_name} gagne le round"
+                else:
+                    self.score[p2] += 1
+                    result = f"🏆 {p2.display_name} gagne le round"
+
+                txt = f"{result}\nScore : {self.score[p1]} - {self.score[p2]}"
+
+                self.choices = {}
+
+                # fin ?
+                if self.score[p1] == 2 or self.score[p2] == 2:
+                    gagnant = p1 if self.score[p1] == 2 else p2
+                    gain = mise * 2
+
+                    self.cog.update_money(gagnant.id, gain)
+                    self.clear_items()
+
+                    return await i.response.edit_message(
+                        content=f"🏆 {gagnant.mention} gagne le duel ! (+{gain}€)",
+                        view=None
+                    )
+
+                await i.response.edit_message(content=txt, view=self)
+
+            async def play(self, i, choix):
+                if i.user not in joueurs:
+                    return
+
+                self.choices[i.user] = choix
+                await self.check_round(i)
+
+            @discord.ui.button(label="🪨")
+            async def pierre(self, i, b):
+                await self.play(i, "pierre")
+
+            @discord.ui.button(label="📄")
+            async def feuille(self, i, b):
+                await self.play(i, "feuille")
+
+            @discord.ui.button(label="✂️")
+            async def ciseaux(self, i, b):
+                await self.play(i, "ciseaux")
+
+        embed = discord.Embed(
+            title="⚔️ PFC",
+            description="Un joueur rejoint pour commencer",
+            color=0xE91E63
+        )
+
+        embed.add_field(name="💰 Mise", value=f"{self.fmt(mise)} €")
+
+        await interaction.response.send_message(embed=embed, view=PFCJoin(self))
 
