@@ -347,3 +347,176 @@ class Jeux(commands.Cog):
 #    par modification de code ou de variable pendant le délai de réflexion.
 # 4. Le code est lié à ta base SQLite pour la persistance des gains.
 
+# ==============================================================================
+# 🚪 LE MYSTÈRE DES PORTES - ÉDITION GRAND CASINO (SÉCURISÉ & ANIMÉ)
+# ==============================================================================
+
+    @jeux.command(name="portes", description="🚪 Choisis la bonne porte pour multiplier ta mise !")
+    async def portes(self, interaction: discord.Interaction, mise: int):
+        """
+        Jeu des Portes avec niveaux de difficulté et animations de révélation.
+        Débit immédiat pour éviter les abandons.
+        """
+        user_id = interaction.user.id
+        solde_actuel = self.get_user(user_id)
+
+        # --- 1. VÉRIFICATIONS DE SÉCURITÉ ---
+        erreur = self.check_mise(mise, 10, 50000, solde_actuel)
+        if erreur:
+            return await interaction.response.send_message(erreur, ephemeral=True)
+
+        # --- 2. DÉBIT IMMÉDIAT (SÉCURITÉ ANTI-DECO) ---
+        self.update_money(user_id, -mise)
+
+        # --- 3. EMBED DE SÉLECTION DE DIFFICULTÉ ---
+        embed_diff = discord.Embed(
+            title="🚪 LE MYSTÈRE DES PORTES",
+            description=(
+                f"Bienvenue {interaction.user.mention} !\n"
+                "Derrière une seule de ces portes se cache le **Trésor**.\n\n"
+                "**Choisis ta difficulté :**\n"
+                "🟢 **FACILE** : 3 Portes (Gain x2.5)\n"
+                "🟡 **MOYEN** : 5 Portes (Gain x4.5)\n"
+                "🔴 **DIFFICILE** : 10 Portes (Gain x9.0)"
+            ),
+            color=0x34495E # Bleu nuit
+        )
+        embed_diff.add_field(name="💰 Mise en jeu", value=f"`{self.fmt(mise)} €`")
+        embed_diff.set_footer(text="Une fois la difficulté choisie, il n'y a plus de retour en arrière !")
+
+        # --- 4. LOGIQUE DES BOUTONS DE DIFFICULTÉ ---
+        class DifficulteView(discord.ui.View):
+            def __init__(self, cog, user, mise_jouee):
+                super().__init__(timeout=45)
+                self.cog = cog
+                self.user = user
+                self.mise = mise_jouee
+                self.choix_fait = False
+
+            async def start_game(self, i: discord.Interaction, nb_portes, multiplicateur):
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Ce n'est pas ton casino !", ephemeral=True)
+                
+                self.choix_fait = True
+                bonne_porte = random.randint(1, nb_portes)
+                
+                # Passage à la vue du jeu
+                game_view = PortesGameView(self.cog, self.user, self.mise, nb_portes, multiplicateur, bonne_porte)
+                
+                embed_game = discord.Embed(
+                    title=f"🚪 JEU EN COURS - {nb_portes} PORTES",
+                    description=f"Trouve la porte gagnante parmi les {nb_portes} propositions !\n\n*Bonne chance...*",
+                    color=0xE67E22
+                )
+                embed_game.add_field(name="🎯 Multiplicateur", value=f"**x{multiplicateur}**")
+                embed_game.add_field(name="💰 Gain potentiel", value=f"**{self.cog.fmt(int(self.mise * multiplicateur))} €**")
+
+                await i.response.edit_message(embed=embed_game, view=game_view)
+                game_view.message = await i.original_response()
+
+            @discord.ui.button(label="FACILE", style=discord.ButtonStyle.success, emoji="🟢")
+            async def facile(self, i, b): await self.start_game(i, 3, 2.5)
+
+            @discord.ui.button(label="MOYEN", style=discord.ButtonStyle.primary, emoji="🟡")
+            async def moyen(self, i, b): await self.start_game(i, 5, 4.5)
+
+            @discord.ui.button(label="DIFFICILE", style=discord.ButtonStyle.danger, emoji="🔴")
+            async def difficile(self, i, b): await self.start_game(i, 10, 9.0)
+
+            async def on_timeout(self):
+                if not self.choix_fait:
+                    # Si timeout ici, la mise est déjà débitée donc perdue
+                    try: await self.message.edit(content="❌ Temps écoulé pour choisir la difficulté. Mise perdue.", embed=None, view=None)
+                    except: pass
+
+        # --- 5. LOGIQUE DU JEU (CHOIX DE LA PORTE) ---
+        class PortesGameView(discord.ui.View):
+            def __init__(self, cog, user, mise, nb_portes, mult, bonne_porte):
+                super().__init__(timeout=60)
+                self.cog = cog
+                self.user = user
+                self.mise = mise
+                self.nb_portes = nb_portes
+                self.mult = mult
+                self.bonne_porte = bonne_porte
+                self.termine = False
+
+                # Génération dynamique des boutons de portes
+                for n in range(1, nb_portes + 1):
+                    self.add_item(PorteButton(n))
+
+            async def check_porte(self, i: discord.Interaction, numero_choisi):
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Ce n'est pas ta partie !", ephemeral=True)
+                
+                if self.termine: return
+                self.termine = True
+                self.stop()
+
+                # --- ANIMATION DE SUSPENSE ---
+                for etape in ["🔍 Inspection...", "🔑 Ouverture...", "🚪 Craaaaac..."]:
+                    embed_anim = discord.Embed(title=etape, color=0xF1C40F)
+                    embed_anim.description = f"Tu as choisi la **Porte n°{numero_choisi}**.\nSuspense..."
+                    await i.response.edit_message(embed=embed_anim, view=None) if not i.response.is_done() else await i.edit_original_response(embed=embed_anim, view=None)
+                    await asyncio.sleep(0.8)
+
+                # --- RÉSULTAT FINAL ---
+                win = (numero_choisi == self.bonne_porte)
+                final_embed = discord.Embed(timestamp=datetime.now())
+
+                if win:
+                    gain = int(self.mise * self.mult)
+                    self.cog.update_money(self.user.id, gain)
+                    final_embed.title = "🎊 INCROYABLE ! TU AS TROUVÉ LE TRÉSOR ! 🎊"
+                    final_embed.color = 0x2ECC71
+                    final_embed.description = (
+                        f"La **Porte n°{numero_choisi}** était bien la bonne !\n\n"
+                        f"💰 **Mise :** `{self.cog.fmt(self.mise)} €`\n"
+                        f"📈 **Gain :** `+{self.cog.fmt(gain)} €`"
+                    )
+                    final_embed.set_image(url="https://i.imgur.com/vH3I0C8.gif") # Gif coffre au trésor
+                else:
+                    final_embed.title = "💀 MAUVAISE PORTE... 💀"
+                    final_embed.color = 0xE74C3C
+                    final_embed.description = (
+                        f"Tu as ouvert la **Porte n°{numero_choisi}**...\n"
+                        f"Elle était vide. Le trésor était derrière la **Porte n°{self.bonne_porte}**.\n\n"
+                        f"❌ **Perte :** `-{self.cog.fmt(self.mise)} €`"
+                    )
+                
+                nouveau_solde = self.cog.get_user(self.user.id)
+                final_embed.add_field(name="💳 Nouveau Solde", value=f"**{self.cog.fmt(nouveau_solde)} €**")
+                await i.edit_original_response(embed=final_embed, view=None)
+
+            async def on_timeout(self):
+                if not self.termine:
+                    try: await self.message.edit(content="⏱️ Trop lent ! Le trésor a été déplacé. Mise perdue.", embed=None, view=None)
+                    except: pass
+
+        # --- 6. CLASSE POUR LES BOUTONS INDIVIDUELS ---
+        class PorteButton(discord.ui.Button):
+            def __init__(self, numero):
+                super().__init__(
+                    label=f"Porte {numero}",
+                    style=discord.ButtonStyle.secondary,
+                    emoji="🚪",
+                    row=(numero-1)//5 # Répartit les boutons sur plusieurs lignes
+                )
+                self.numero = numero
+
+            async def callback(self, i: discord.Interaction):
+                await self.view.check_porte(i, self.numero)
+
+        # --- 7. LANCEMENT ---
+        view_diff = DifficulteView(self, interaction.user, mise)
+        await interaction.response.send_message(embed=embed_diff, view=view_diff)
+        view_diff.message = await interaction.original_response()
+
+# ==============================================================================
+# 💡 NOTES TECHNIQUES (SÉCURITÉ)
+# ==============================================================================
+# - L'argent est retiré à la ligne 25 (AVANT tout affichage).
+# - Si l'utilisateur quitte après avoir choisi la difficulté, le casino garde l'argent.
+# - Les gains (x2.5, x4.5, x9.0) sont calculés pour être rentables mais risqués.
+# - Utilise self.bot.db pour assurer que les gains sont bien enregistrés sur Railway.
+
