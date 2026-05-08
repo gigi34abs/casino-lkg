@@ -879,3 +879,184 @@ class Jeux(commands.Cog):
 #   d'un autre ne fera rien. Le délai de 0.2s bloque les macro-clics.
 # - Persistance : En cas de déconnexion d'un joueur, la course continue pour les autres.
 
+# ==============================================================================
+# ⚔️ PIERRE-FEUILLE-CISEAUX - ÉDITION TOURNOI (BO5 & SÉCURISÉ)
+# ==============================================================================
+
+    @jeux.command(name="pfc", description="⚔️ Duel en 3 points gagnants (BO5) contre un autre joueur !")
+    async def pfc(self, interaction: discord.Interaction, mise: int):
+        """
+        Système de duel PFC.
+        Best of 5 : le premier à 3 victoires gagne la mise de l'adversaire.
+        """
+        user_id = interaction.user.id
+        solde_actuel = self.get_user(user_id)
+
+        # --- 1. SÉCURITÉ & LOBBY ---
+        if mise < 50:
+            return await interaction.response.send_message("❌ La mise minimale pour un duel est de 50 €.", ephemeral=True)
+        if solde_actuel < mise:
+            return await interaction.response.send_message("❌ Tu n'as pas assez d'argent pour parier autant.", ephemeral=True)
+
+        embed_lobby = discord.Embed(
+            title="⚔️ DÉFI DE DUELLancé !",
+            description=(
+                f"**Organisateur :** {interaction.user.mention}\n"
+                f"**Mise :** `{self.fmt(mise)} €`\n\n"
+                "**Règles du Tournoi :**\n"
+                "🔹 Le premier à atteindre **3 points** gagne.\n"
+                "🔹 L'argent est retiré aux deux joueurs au début.\n"
+                "🔹 Le gagnant repart avec **la totalité des mises** !"
+            ),
+            color=0xE91E63 # Rose combat
+        )
+        embed_lobby.set_footer(text="En attente d'un adversaire courageux...")
+
+        # --- 2. LOGIQUE DU LOBBY ---
+        class PFCLobby(discord.ui.View):
+            def __init__(self, cog, host, mise_duel):
+                super().__init__(timeout=120)
+                self.cog = cog
+                self.host = host
+                self.mise = mise_duel
+                self.adversaire = None
+
+            @discord.ui.button(label="ACCEPTER LE DUEL", style=discord.ButtonStyle.danger, emoji="⚔️")
+            async def join(self, i, b):
+                if i.user.id == self.host.id:
+                    return await i.response.send_message("❌ Tu ne peux pas te battre contre toi-même !", ephemeral=True)
+                
+                if self.cog.get_user(i.user.id) < self.mise:
+                    return await i.response.send_message("❌ Tu n'as pas assez d'argent pour accepter ce défi.", ephemeral=True)
+
+                self.adversaire = i.user
+                self.stop() # On ferme le lobby pour lancer le jeu
+
+                # --- DÉBIT DES DEUX JOUEURS ---
+                self.cog.update_money(self.host.id, -self.mise)
+                self.cog.update_money(self.adversaire.id, -self.mise)
+
+                # --- LANCEMENT DU JEU ---
+                game_view = PFCGame(self.cog, self.host, self.adversaire, self.mise)
+                await i.response.edit_message(content=f"🔥 **LE COMBAT COMMENCE !** {self.host.mention} vs {self.adversaire.mention}", embed=None, view=game_view)
+                game_view.message = await i.original_response()
+
+            async def on_timeout(self):
+                try: await self.original_inter.edit_original_response(content="❌ Duel expiré. Personne n'a osé relever le défi.", embed=None, view=None)
+                except: pass
+
+        # --- 3. LOGIQUE DU COMBAT (GAME) ---
+        class PFCGame(discord.ui.View):
+            def __init__(self, cog, p1, p2, mise):
+                super().__init__(timeout=180)
+                self.cog = cog
+                self.players = [p1, p2]
+                self.mise = mise
+                self.scores = {p1.id: 0, p2.id: 0}
+                self.choices = {p1.id: None, p2.id: None}
+                self.history = []
+
+            async def update_display(self, i, text=""):
+                embed = discord.Embed(
+                    title="⚔️ TOURNOI DE PFC - EN COURS",
+                    description=f"**Cagnotte :** `{self.cog.fmt(self.mise * 2)} €`\n\n{text}",
+                    color=0x2ECC71
+                )
+                
+                # Visualisation des scores
+                score_text = (
+                    f"{self.players[0].display_name}: **{self.scores[self.players[0].id]}**\n"
+                    f"{self.players[1].display_name}: **{self.scores[self.players[1].id]}**"
+                )
+                embed.add_field(name="📊 Score (Premier à 3)", value=score_text, inline=True)
+
+                # État des choix
+                choix_p1 = "✅ Prêt" if self.choices[self.players[0].id] else "⏳ En attente..."
+                choix_p2 = "✅ Prêt" if self.choices[self.players[1].id] else "⏳ En attente..."
+                embed.add_field(name="🎮 État", value=f"{self.players[0].display_name}: {choix_p1}\n{self.players[1].display_name}: {choix_p2}", inline=True)
+
+                if self.history:
+                    embed.add_field(name="📜 Historique", value="\n".join(self.history[-3:]), inline=False)
+
+                await i.edit_original_response(embed=embed, view=self)
+
+            async def process_round(self, i):
+                p1, p2 = self.players
+                c1, c2 = self.choices[p1.id], self.choices[p2.id]
+                
+                # Logique des signes
+                win_map = {"pierre": "ciseaux", "feuille": "pierre", "ciseaux": "feuille"}
+                round_res = ""
+
+                if c1 == c2:
+                    round_res = f"🤝 **Égalité !** ({c1} vs {c2})"
+                elif win_map[c1] == c2:
+                    self.scores[p1.id] += 1
+                    round_res = f"⭐ **{p1.display_name}** gagne le round ! ({c1} bat {c2})"
+                else:
+                    self.scores[p2.id] += 1
+                    round_res = f"⭐ **{p2.display_name}** gagne le round ! ({c2} bat {c1})"
+
+                self.history.append(round_res)
+                self.choices = {p1.id: None, p2.id: None} # Reset des choix
+
+                # Vérification de la victoire finale (BO5 = 3 points)
+                if self.scores[p1.id] >= 3 or self.scores[p2.id] >= 3:
+                    winner = p1 if self.scores[p1.id] >= 3 else p2
+                    cagnotte = self.mise * 2
+                    self.cog.update_money(winner.id, cagnotte)
+                    
+                    self.stop()
+                    end_embed = discord.Embed(
+                        title="🏆 LE CHAMPION EST DÉSIGNÉ !",
+                        description=(
+                            f"L'incroyable **{winner.mention}** remporte le duel !\n"
+                            f"Score final : `{self.scores[p1.id]} - {self.scores[p2.id]}`\n\n"
+                            f"💰 **Gain :** `+{self.cog.fmt(cagnotte)} €`"
+                        ),
+                        color=0xF1C40F
+                    )
+                    end_embed.set_footer(text="L'argent a été versé sur le compte bancaire.")
+                    return await i.edit_original_response(content=None, embed=end_embed, view=None)
+
+                await self.update_display(i, text=f"**Dernier round :** {round_res}")
+
+            async def make_choice(self, i, choice):
+                if i.user.id not in [p.id for p in self.players]:
+                    return await i.response.send_message("❌ Tu ne participes pas à ce duel !", ephemeral=True)
+                
+                if self.choices[i.user.id]:
+                    return await i.response.send_message("❌ Tu as déjà fait ton choix !", ephemeral=True)
+
+                self.choices[i.user.id] = choice
+                await i.response.defer() # Évite le "L'interaction a échoué"
+
+                if all(self.choices.values()):
+                    await self.process_round(i)
+                else:
+                    await self.update_display(i)
+
+            @discord.ui.button(label="PIERRE", style=discord.ButtonStyle.secondary, emoji="🪨")
+            async def stone(self, i, b): await self.make_choice(i, "pierre")
+
+            @discord.ui.button(label="FEUILLE", style=discord.ButtonStyle.secondary, emoji="📄")
+            async def paper(self, i, b): await self.make_choice(i, "feuille")
+
+            @discord.ui.button(label="CISEAUX", style=discord.ButtonStyle.secondary, emoji="✂️")
+            async def scissors(self, i, b): await self.make_choice(i, "ciseaux")
+
+        # --- 4. LANCEMENT ---
+        view = PFCLobby(self, interaction.user, mise)
+        view.original_inter = interaction
+        await interaction.response.send_message(embed=embed_lobby, view=view)
+
+# ==============================================================================
+# 💡 NOTES TECHNIQUES (SÉCURITÉ)
+# ==============================================================================
+# - Best of 5 : Le jeu dure plus longtemps et est plus juste que sur un seul coup.
+# - Anti-Triche : Les choix sont stockés dans un dictionnaire interne et ne sont 
+#   révélés qu'une fois que les deux joueurs ont cliqué.
+# - SQLite : La mise totale (x2) est créditée automatiquement au gagnant.
+# - Débit Sécurisé : L'argent est retiré à l'instant où l'adversaire clique sur 
+#   'Accepter'. Si un joueur quitte le combat, il a déjà perdu son argent.
+
