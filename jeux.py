@@ -13,28 +13,25 @@ class Jeux(commands.Cog):
         self.bot.tree.add_command(self.jeux)
 
     # =========================
-    # 💰 SYSTÈME ARGENT
+    # 💰 SYSTÈME ARGENT (LIÉ À LA DB SQLITE)
     # =========================
 
     def get_user(self, user_id):
-        if user_id not in self.data:
-            self.data[user_id] = 1000
-        return self.data[user_id]
+        # On utilise la connexion 'db' créée dans le main.py
+        cursor = self.bot.db.cursor()
+        cursor.execute("SELECT money FROM users WHERE user_id = ?", (user_id,))
+        res = cursor.fetchone()
+        if res:
+            return res[0]
+        # Si l'utilisateur n'est pas dans la DB, on le crée avec 100€ (comme ton main)
+        cursor.execute("INSERT INTO users (user_id, money) VALUES (?, 100)", (user_id,))
+        self.bot.db.commit()
+        return 100
 
     def update_money(self, user_id, amount):
-        self.data[user_id] = self.get_user(user_id) + amount
-
-    def fmt(self, x):
-        return f"{x:,}".replace(",", " ")
-
-    def check_mise(self, mise, minv, maxv, solde):
-        if mise < minv:
-            return f"❌ Mise minimum : {minv} €"
-        if mise > maxv:
-            return f"❌ Mise maximum : {maxv} €"
-        if solde < mise:
-            return "❌ Tu n'as pas assez d'argent"
-        return None
+        cursor = self.bot.db.cursor()
+        cursor.execute("UPDATE users SET money = money + ? WHERE user_id = ?", (amount, user_id))
+        self.bot.db.commit()
 
     # =========================
     # 🎮 GROUPE
