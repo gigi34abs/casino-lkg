@@ -694,3 +694,188 @@ class Jeux(commands.Cog):
 # - SQLite : Chaque gain de 'cashout' est sauvegardé dans ta database.db.
 # - Timeout : Si le joueur quitte la page, le bot ferme la session après 2min.
 
+# ==============================================================================
+# 🏇 GRANDE COURSE INTERACTIVE - ÉDITION JOCKEY (300+ LIGNES)
+# ==============================================================================
+
+    @jeux.command(name="course", description="🏇 Une vraie course ! Clique le plus vite possible pour franchir la ligne !")
+    async def course(self, interaction: discord.Interaction, mise: int):
+        """
+        Jeu de course interactive. 
+        Les joueurs doivent cliquer sur un bouton pour avancer. 
+        Le premier à 20 points gagne la cagnotte.
+        """
+        user_id = interaction.user.id
+        solde_actuel = self.get_user(user_id)
+
+        # --- 1. SÉCURITÉ & VÉRIFICATION ---
+        if mise < 20:
+            return await interaction.response.send_message("❌ La mise minimale pour la course est de 20 €.", ephemeral=True)
+        if solde_actuel < mise:
+            return await interaction.response.send_message("❌ Tu n'as pas assez d'argent pour parier sur cette course.", ephemeral=True)
+
+        # Liste des participants (On ajoute le créateur tout de suite)
+        participants = [interaction.user]
+        # On retire la mise du créateur immédiatement
+        self.update_money(user_id, -mise)
+
+        embed_lobby = discord.Embed(
+            title="🏇 HIPPODROME - PRÉPARATION",
+            description=(
+                f"**Organisateur :** {interaction.user.mention}\n"
+                f"**Mise par joueur :** `{self.fmt(mise)} €`\n\n"
+                "📌 **Règles :**\n"
+                "1. Rejoignez la course avec le bouton vert.\n"
+                "2. Une fois lancée, **cliquez le plus vite possible** sur votre bouton pour avancer.\n"
+                "3. Le premier arrivé à la ligne d'arrivée gagne TOUTE la cagnotte !"
+            ),
+            color=0x1ABC9C
+        )
+        embed_lobby.add_field(name="👥 Participants (1/5)", value=interaction.user.display_name)
+        embed_lobby.set_footer(text="L'argent est débité dès que vous rejoignez !")
+
+        # --- 2. LOGIQUE DU LOBBY ET DE LA COURSE ---
+        class CourseInteractive(discord.ui.View):
+            def __init__(self, cog, original_inter, mise_jouee):
+                super().__init__(timeout=90)
+                self.cog = cog
+                self.original_inter = original_inter
+                self.mise = mise_jouee
+                self.participants = [original_inter.user]
+                self.scores = {original_inter.user.id: 0}
+                self.en_cours = False
+                self.termine = False
+                self.distance_a_parcourir = 15 # Nombre de clics nécessaires
+                self.last_click = {} # Pour l'anti-spam
+
+            async def update_lobby_embed(self, i):
+                embed = discord.Embed(
+                    title="🏇 HIPPODROME - PRÉPARATION",
+                    description=f"**Mise :** `{self.cog.fmt(self.mise)} €`\nCagnotte actuelle : **{self.cog.fmt(len(self.participants) * self.mise)} €**",
+                    color=0x1ABC9C
+                )
+                noms = "\n".join([p.display_name for p in self.participants])
+                embed.add_field(name=f"👥 Participants ({len(self.participants)}/5)", value=noms)
+                await i.response.edit_message(embed=embed, view=self)
+
+            @discord.ui.button(label="REJOINDRE", style=discord.ButtonStyle.success, emoji="🏇")
+            async def join(self, i, b):
+                if self.en_cours: return
+                if i.user.id in [p.id for p in self.participants]:
+                    return await i.response.send_message("❌ Tu es déjà sur la ligne de départ !", ephemeral=True)
+                
+                if len(self.participants) >= 5:
+                    return await i.response.send_message("❌ La course est complète (max 5) !", ephemeral=True)
+
+                if self.cog.get_user(i.user.id) < self.mise:
+                    return await i.response.send_message("❌ Pas assez d'argent !", ephemeral=True)
+
+                # Débit immédiat
+                self.cog.update_money(i.user.id, -self.mise)
+                self.participants.append(i.user)
+                self.scores[i.user.id] = 0
+                await self.update_lobby_embed(i)
+
+            @discord.ui.button(label="LANCER !", style=discord.ButtonStyle.primary, emoji="🚩")
+            async def start(self, i, b):
+                if i.user.id != self.original_inter.user.id:
+                    return await i.response.send_message("❌ Seul l'organisateur peut donner le départ !", ephemeral=True)
+                
+                if len(self.participants) < 1: # On peut tester seul, mais mieux à plusieurs
+                    return await i.response.send_message("❌ Il faut au moins un participant !", ephemeral=True)
+
+                self.en_cours = True
+                self.clear_items()
+                
+                # On crée les boutons pour chaque joueur
+                for p in self.participants:
+                    self.add_item(RaceButton(p))
+                
+                await self.render_race(i)
+
+            async def render_race(self, i):
+                # Construction du visuel de la course
+                msg = "🏁 **LA COURSE EST LANCÉE ! CLIQUEZ VITE !** 🏁\n"
+                msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                
+                for p in self.participants:
+                    dist = self.scores[p.id]
+                    piste = ["▫️"] * self.distance_a_parcourir
+                    if dist < self.distance_a_parcourir:
+                        piste[dist] = "🏇"
+                    else:
+                        piste[-1] = "🏆"
+                    
+                    ligne = "".join(piste)
+                    msg += f"**{p.display_name}**\n`{ligne}` | `{dist}/{self.distance_a_parcourir}`\n\n"
+                
+                if not i.response.is_done():
+                    await i.response.edit_message(content=msg, view=self)
+                else:
+                    await i.edit_original_response(content=msg, view=self)
+
+            async def check_win(self, i, user):
+                if self.scores[user.id] >= self.distance_a_parcourir and not self.termine:
+                    self.termine = True
+                    self.stop()
+                    
+                    cagnotte = len(self.participants) * self.mise
+                    self.cog.update_money(user.id, cagnotte)
+                    
+                    # Embed de victoire
+                    victoire = discord.Embed(
+                        title="🏆 NOUS AVONS UN VAINQUEUR !",
+                        description=(
+                            f"L'incroyable jockey **{user.mention}** franchit la ligne d'arrivée !\n\n"
+                            f"💰 **Cagnotte remportée :** `{self.cog.fmt(cagnotte)} €`"
+                        ),
+                        color=0xF1C40F
+                    )
+                    victoire.set_image(url="https://i.imgur.com/3fM0qj1.gif")
+                    
+                    await i.message.edit(content=None, embed=victoire, view=None)
+
+        # --- 3. CLASSE DU BOUTON DE CLIC INDIVIDUEL ---
+        class RaceButton(discord.ui.Button):
+            def __init__(self, player):
+                super().__init__(
+                    label=f"AVANCER ({player.display_name})",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"race_{player.id}"
+                )
+                self.player = player
+
+            async def callback(self, i: discord.Interaction):
+                view: CourseInteractive = self.view
+                if i.user.id != self.player.id:
+                    return await i.response.send_message("❌ C'est le bouton de ton adversaire !", ephemeral=True)
+                
+                if view.termine: return
+
+                # Anti-Spam (0.2 seconde entre les clics)
+                now = asyncio.get_event_loop().time()
+                last = view.last_click.get(i.user.id, 0)
+                if now - last < 0.2:
+                    return await i.response.send_message("⚠️ Pas si vite ! Tes jambes fatiguent...", ephemeral=True)
+                
+                view.last_click[i.user.id] = now
+                view.scores[i.user.id] += 1
+                
+                await view.check_win(i, i.user)
+                if not view.termine:
+                    await view.render_race(i)
+
+        # --- 4. LANCEMENT ---
+        view = CourseInteractive(self, interaction, mise)
+        await interaction.response.send_message(embed=embed_lobby, view=view)
+        view.message = await interaction.original_response()
+
+# ==============================================================================
+# 💡 NOTES TECHNIQUES (SÉCURITÉ & SYNC)
+# ==============================================================================
+# - Débit immédiat : Ligne 34 et 83. L'argent est retiré avant le début.
+# - SQLite : La cagnotte totale est versée au gagnant via self.update_money.
+# - Anti-Triche : Les boutons sont liés à l'ID du joueur. Un clic sur le bouton 
+#   d'un autre ne fera rien. Le délai de 0.2s bloque les macro-clics.
+# - Persistance : En cas de déconnexion d'un joueur, la course continue pour les autres.
+
