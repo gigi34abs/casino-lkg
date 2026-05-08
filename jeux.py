@@ -520,3 +520,177 @@ class Jeux(commands.Cog):
 # - Les gains (x2.5, x4.5, x9.0) sont calculés pour être rentables mais risqués.
 # - Utilise self.bot.db pour assurer que les gains sont bien enregistrés sur Railway.
 
+# ==============================================================================
+# ☢️ JEU DU RISQUE - GRILLE DE 25 CASES (SÉCURISÉ & ANTI-TRICHE)
+# ==============================================================================
+
+    @jeux.command(name="risque", description="☢️ Grille de 25 cases : Trouve les étoiles et évite les bombes !")
+    async def risque(self, interaction: discord.Interaction, mise: int):
+        """
+        Jeu du Risque (style Mines). 
+        Grille de 5x5, débit immédiat, calcul de probabilités et sécurité SQLite.
+        """
+        user_id = interaction.user.id
+        solde_actuel = self.get_user(user_id)
+
+        # --- 1. SÉCURITÉ & VÉRIFICATION ---
+        if mise < 50:
+            return await interaction.response.send_message("❌ La mise minimale pour le Risque est de 50 €.", ephemeral=True)
+        if solde_actuel < mise:
+            return await interaction.response.send_message("❌ Tu n'as pas assez d'argent pour ce niveau de risque.", ephemeral=True)
+
+        # --- 2. DÉBIT IMMÉDIAT ---
+        # On encaisse la mise AVANT de générer la grille
+        self.update_money(user_id, -mise)
+
+        # --- 3. CONFIGURATION DE LA PARTIE ---
+        # On place 3 bombes aléatoirement sur 25 cases (index 0 à 24)
+        positions_bombes = random.sample(range(25), 3)
+        
+        embed_init = discord.Embed(
+            title="☢️ JEU DU RISQUE - GRILLE SÉCURISÉE",
+            description=(
+                f"**Joueur :** {interaction.user.mention}\n"
+                f"**Mise :** `{self.fmt(mise)} €`\n"
+                "**Objectif :** Clique sur les cases pour trouver des ⭐.\n"
+                "Attention, il y a **3 bombes 💣** cachées !\n\n"
+                "*L'argent a été débité. Bonne chance !*"
+            ),
+            color=0x2C2F33 # Gris pro
+        )
+        embed_init.set_footer(text="Système Anti-Triche : Les bombes sont déjà placées.")
+
+        # --- 4. LOGIQUE DE LA GRILLE (VIEW) ---
+        class RisqueGrille(discord.ui.View):
+            def __init__(self, cog, user, mise_jouee, bombes):
+                super().__init__(timeout=120) # 2 minutes pour finir la grille
+                self.cog = cog
+                self.user = user
+                self.mise = mise_jouee
+                self.bombes = bombes
+                self.cases_trouvees = 0
+                self.gain_actuel = mise_jouee
+                self.termine = False
+                
+                # Génération des 25 boutons (5x5)
+                for i in range(25):
+                    self.add_item(CaseButton(i))
+
+            def calculer_multiplicateur(self):
+                # Formule de gain : Augmente de 25% à chaque étoile trouvée
+                return round(1.25 ** self.cases_trouvees, 2)
+
+            async def on_timeout(self):
+                if not self.termine:
+                    self.termine = True
+                    for item in self.children:
+                        item.disabled = True
+                    try:
+                        await self.message.edit(content="⏱️ **TEMPS ÉCOULÉ** : Tu as trop attendu, le casino garde la mise !", view=None)
+                    except: pass
+
+            async def reveler_case(self, i: discord.Interaction, bouton):
+                if i.user.id != self.user.id:
+                    return await i.response.send_message("❌ Ce n'est pas ta grille !", ephemeral=True)
+                
+                if self.termine: return
+
+                # SI C'EST UNE BOMBE
+                if bouton.index in self.bombes:
+                    self.termine = True
+                    self.stop()
+                    
+                    # Révéler toutes les bombes à la fin
+                    for item in self.children:
+                        item.disabled = True
+                        if item.index in self.bombes:
+                            item.emoji = "💣"
+                            item.style = discord.ButtonStyle.danger
+                    
+                    loss_embed = discord.Embed(
+                        title="💥 BOOOOOM ! 💥",
+                        description=(
+                            f"Tu as touché une bombe sur la case {bouton.index + 1}...\n"
+                            f"Tu perds ta mise de **{self.cog.fmt(self.mise)} €**."
+                        ),
+                        color=0xE74C3C
+                    )
+                    loss_embed.set_image(url="https://i.imgur.com/8NTe7vA.gif")
+                    await i.response.edit_message(embed=loss_embed, view=self)
+
+                # SI C'EST UNE ÉTOILE
+                else:
+                    self.cases_trouvees += 1
+                    bouton.emoji = "⭐"
+                    bouton.style = discord.ButtonStyle.success
+                    bouton.disabled = True
+                    
+                    mult = self.calculer_multiplicateur()
+                    self.gain_actuel = int(self.mise * mult)
+                    
+                    status_embed = discord.Embed(
+                        title="☢️ RISQUE - EN COURS",
+                        description=(
+                            f"✅ Étoile trouvée ! ({self.cases_trouvees}/22)\n"
+                            f"💰 Gain accumulé : **{self.cog.fmt(self.gain_actuel)} €**\n"
+                            f"📈 Multiplicateur : `x{mult}`\n\n"
+                            "**Que veux-tu faire ?**\n"
+                            "👉 Continue de cliquer sur la grille\n"
+                            "👉 Ou clique sur **CASHOUT** pour t'arrêter !"
+                        ),
+                        color=0x2ECC71
+                    )
+                    
+                    await i.response.edit_message(embed=status_embed, view=self)
+
+            @discord.ui.button(label="💰 CASHOUT (Récupérer)", style=discord.ButtonStyle.secondary, row=4)
+            async def cashout(self, i, b):
+                if i.user.id != self.user.id: return
+                if self.cases_trouvees == 0:
+                    return await i.response.send_message("❌ Trouve au moins une étoile avant de cashout !", ephemeral=True)
+                
+                self.termine = True
+                self.stop()
+                
+                # On ajoute le gain final à la DB
+                self.cog.update_money(self.user.id, self.gain_actuel)
+                
+                win_embed = discord.Embed(
+                    title="💰 CASHOUT RÉUSSI !",
+                    description=(
+                        f"Tu as sagement décidé de t'arrêter.\n"
+                        f"Tu repars avec **{self.cog.fmt(self.gain_actuel)} €** !\n\n"
+                        f"Étoiles trouvées : `{self.cases_trouvees}`"
+                    ),
+                    color=0xF1C40F
+                )
+                
+                # On désactive tout
+                for item in self.children: item.disabled = True
+                await i.response.edit_message(embed=win_embed, view=self)
+
+        # --- 5. CLASSE BOUTON DE CASE ---
+        class CaseButton(discord.ui.Button):
+            def __init__(self, index):
+                # On calcule la ligne (row) : 5 cases par ligne
+                row_val = index // 5
+                super().__init__(label="?", style=discord.ButtonStyle.gray, row=row_val)
+                self.index = index
+
+            async def callback(self, i: discord.Interaction):
+                await self.view.reveler_case(i, self)
+
+        # --- 6. LANCEMENT ---
+        view = RisqueGrille(self, interaction.user, mise, positions_bombes)
+        await interaction.response.send_message(embed=embed_init, view=view)
+        view.message = await interaction.original_response()
+
+# ==============================================================================
+# 💡 COMMENTAIRES TECHNIQUES
+# ==============================================================================
+# - Débit de l'argent : Ligne 26. Aucun remboursement si le joueur ne clique pas.
+# - Grille Dynamique : Utilisation de 'row' pour créer un carré parfait de 5x5.
+# - Anti-Triche : Les positions des bombes (positions_bombes) sont définies AVANT.
+# - SQLite : Chaque gain de 'cashout' est sauvegardé dans ta database.db.
+# - Timeout : Si le joueur quitte la page, le bot ferme la session après 2min.
+
