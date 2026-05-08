@@ -1060,3 +1060,231 @@ class Jeux(commands.Cog):
 # - Débit Sécurisé : L'argent est retiré à l'instant où l'adversaire clique sur 
 #   'Accepter'. Si un joueur quitte le combat, il a déjà perdu son argent.
 
+# ==============================================================================
+# 🃏 UNO SUPRÊME - ÉDITION CASINO (PÉNALITÉS & STRATÉGIE)
+# ==============================================================================
+
+    @jeux.command(name="uno", description="🃏 Un vrai UNO ! (Pénalités : Passer -45€ | Abandon -200€)")
+    async def uno(self, interaction: discord.Interaction):
+        """
+        Système de UNO complet avec gestion de deck, main des joueurs,
+        et prélèvements automatiques sur la base de données.
+        """
+        
+        # --- 1. INITIALISATION DES DONNÉES DU JEU ---
+        couleurs = ["🔴", "🔵", "🟢", "🟡"]
+        valeurs = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "🚫", "🔄", "+2"]
+        
+        def generer_deck():
+            deck = []
+            for c in couleurs:
+                for v valeurs:
+                    deck.append({"c": c, "v": v})
+                    if v != "0": # Deux exemplaires sauf pour le 0
+                        deck.append({"c": c, "v": v})
+            random.shuffle(deck)
+            return deck
+
+        # --- 2. LOGIQUE DU LOBBY ---
+        joueurs = [interaction.user]
+        
+        class UnoLobby(discord.ui.View):
+            def __init__(self, cog, host):
+                super().__init__(timeout=60)
+                self.cog = cog
+                self.host = host
+                self.participants = [host]
+
+            @discord.ui.button(label="REJOINDRE", style=discord.ButtonStyle.primary, emoji="➕")
+            async def join(self, i, b):
+                if i.user.id in [p.id for p in self.participants]:
+                    return await i.response.send_message("❌ Tu es déjà dans la partie !", ephemeral=True)
+                if len(self.participants) >= 4:
+                    return await i.response.send_message("❌ Partie complète (Max 4) !", ephemeral=True)
+                
+                # On vérifie si le joueur a au moins 200€ pour l'éventuelle amende d'abandon
+                if self.cog.get_user(i.user.id) < 200:
+                    return await i.response.send_message("❌ Il te faut au moins 200€ pour couvrir les amendes d'abandon !", ephemeral=True)
+
+                self.participants.append(i.user)
+                await i.response.edit_message(content=f"📝 **Lobby UNO**\nJoueurs : " + ", ".join([p.display_name for p in self.participants]))
+
+            @discord.ui.button(label="LANCER", style=discord.ButtonStyle.success, emoji="🚀")
+            async def start(self, i, b):
+                if i.user.id != self.host.id:
+                    return await i.response.send_message("❌ Seul l'hôte peut lancer !", ephemeral=True)
+                if len(self.participants) < 2:
+                    return await i.response.send_message("❌ Il faut au moins 2 joueurs !", ephemeral=True)
+
+                self.stop()
+                game = UnoGameView(self.cog, self.participants, generer_deck(), couleurs)
+                await i.response.edit_message(content="🃏 **Distribution des cartes...**", embed=None, view=game)
+                await game.lancer_partie(i)
+
+        # --- 3. LE MOTEUR DU JEU (VIEW PRINCIPALE) ---
+        class UnoGameView(discord.ui.View):
+            def __init__(self, cog, participants, deck, couleurs):
+                super().__init__(timeout=300)
+                self.cog = cog
+                self.deck = deck
+                self.participants = participants
+                self.mains = {p.id: [self.deck.pop() for _ in range(7)] for p in participants}
+                self.defausse = [self.deck.pop()]
+                self.tour_index = 0
+                self.sens = 1 # 1 ou -1
+                self.couleurs = couleurs
+                self.termine = False
+
+            @property
+            def joueur_actuel(self):
+                return self.participants[self.tour_index]
+
+            @property
+            def derniere_carte(self):
+                return self.defausse[-1]
+
+            async def lancer_partie(self, i):
+                await self.maj_affichage(i)
+
+            def passer_tour(self, sauter=1):
+                self.tour_index = (self.tour_index + (self.sens * sauter)) % len(self.participants)
+
+            async def maj_affichage(self, i, texte=""):
+                embed = discord.Embed(
+                    title="🃏 PARTIE DE UNO EN COURS",
+                    description=(
+                        f"**Dernière carte jouée :**\n# 【 {self.derniere_carte['c']} {self.derniere_carte['v']} 】\n\n"
+                        f"C'est au tour de : {self.joueur_actuel.mention}\n{texte}"
+                    ),
+                    color=0x2F3136
+                )
+                
+                # Liste des joueurs et nombre de cartes
+                liste_p = ""
+                for p in self.participants:
+                    prefix = "➡️ " if p.id == self.joueur_actuel.id else "🔹 "
+                    liste_p += f"{prefix}**{p.display_name}** : {len(self.mains[p.id])} cartes\n"
+                
+                embed.add_field(name="👥 Joueurs", value=liste_p, inline=False)
+                embed.set_footer(text="Passer = -45€ | Abandon = -200€")
+
+                # Boutons
+                self.clear_items()
+                self.add_item(ActionButtons(label="Voir ma main", style=discord.ButtonStyle.primary, custom_id="voir_main", emoji="🎴"))
+                self.add_item(ActionButtons(label="Piocher / Passer (-45€)", style=discord.ButtonStyle.secondary, custom_id="piocher", emoji="📥"))
+                self.add_item(ActionButtons(label="ABANDONNER (-200€)", style=discord.ButtonStyle.danger, custom_id="abandon", emoji="🏳️"))
+
+                if i.response.is_done():
+                    await i.edit_original_response(embed=embed, view=self)
+                else:
+                    await i.response.edit_message(embed=embed, view=self)
+
+            async def gerer_action(self, i, action):
+                if action == "abandon":
+                    # Pénalité d'abandon
+                    self.cog.update_money(i.user.id, -200)
+                    self.participants.remove(i.user)
+                    if len(self.participants) < 2:
+                        self.termine = True
+                        self.stop()
+                        return await i.response.edit_message(content=f"💀 **PARTIE ANNULÉE** : Trop d'abandons. {i.user.display_name} a perdu 200€.", embed=None, view=None)
+                    
+                    self.passer_tour(0)
+                    await self.maj_affichage(i, texte=f"⚠️ {i.user.display_name} a abandonné (-200€) !")
+
+                elif action == "piocher":
+                    if i.user.id != self.joueur_actuel.id:
+                        return await i.response.send_message("❌ Ce n'est pas ton tour !", ephemeral=True)
+                    
+                    # Pénalité de pioche/passe
+                    self.cog.update_money(i.user.id, -45)
+                    nouvelle_carte = self.deck.pop()
+                    self.mains[i.user.id].append(nouvelle_carte)
+                    
+                    self.passer_tour()
+                    await self.maj_affichage(i, texte=f"📥 {i.user.display_name} a pioché et passé son tour (-45€).")
+
+                elif action == "voir_main":
+                    # Vue privée pour jouer ses cartes
+                    view_main = MainPrivee(self, i.user)
+                    await i.response.send_message(f"🃏 **Ta main (Dernière : {self.derniere_carte['c']} {self.derniere_carte['v']})**", view=view_main, ephemeral=True)
+
+        # --- 4. BOUTONS D'ACTIONS GÉNÉRALES ---
+        class ActionButtons(discord.ui.Button):
+            async def callback(self, i: discord.Interaction):
+                await self.view.gerer_action(i, self.custom_id)
+
+        # --- 5. MENU PRIVÉ (POUR JOUER SES CARTES) ---
+        class MainPrivee(discord.ui.View):
+            def __init__(self, game_view, user):
+                super().__init__(timeout=60)
+                self.game_view = game_view
+                self.user = user
+                
+                # On crée un bouton par carte dans la main (limité aux 25 premières)
+                for index, carte in enumerate(self.game_view.mains[user.id][:25]):
+                    style = discord.ButtonStyle.secondary
+                    if carte['c'] == "🔴": style = discord.ButtonStyle.danger
+                    elif carte['c'] == "🔵": style = discord.ButtonStyle.primary
+                    elif carte['c'] == "🟢": style = discord.ButtonStyle.success
+
+                    btn = discord.ui.Button(label=f"{carte['v']}", emoji=carte['c'], style=style, custom_id=str(index))
+                    btn.callback = self.play_card
+                    self.add_item(btn)
+
+            async def play_card(self, i: discord.Interaction):
+                if i.user.id != self.game_view.joueur_actuel.id:
+                    return await i.response.send_message("❌ C'est pas ton tour dans le salon public !", ephemeral=True)
+                
+                idx = int(i.data['custom_id'])
+                carte = self.game_view.mains[self.user.id][idx]
+                last = self.game_view.derniere_carte
+
+                # VERIFICATION DES REGLES DU UNO
+                if carte['c'] == last['c'] or carte['v'] == last['v']:
+                    # Carte valide
+                    self.game_view.mains[self.user.id].pop(idx)
+                    self.game_view.defausse.append(carte)
+                    
+                    # Effets spéciaux
+                    effet_msg = ""
+                    if carte['v'] == "🚫":
+                        self.game_view.passer_tour(2)
+                        effet_msg = "🚫 Tour sauté !"
+                    elif carte['v'] == "🔄":
+                        self.game_view.sens *= -1
+                        self.game_view.passer_tour()
+                        effet_msg = "🔄 Changement de sens !"
+                    elif carte['v'] == "+2":
+                        self.game_view.passer_tour()
+                        cible = self.game_view.joueur_actuel
+                        for _ in range(2): self.game_view.mains[cible.id].append(self.game_view.deck.pop())
+                        effet_msg = f"➕2 pour {cible.display_name} !"
+                        self.game_view.passer_tour()
+                    else:
+                        self.game_view.passer_tour()
+
+                    # Vérification victoire
+                    if len(self.game_view.mains[self.user.id]) == 0:
+                        self.game_view.termine = True
+                        self.game_view.stop()
+                        # Gain : On peut imaginer que le gagnant prend les 45€ accumulés ou un fixe
+                        self.game_view.cog.update_money(self.user.id, 500) 
+                        await i.response.edit_message(content="🏆 **TU AS GAGNÉ !**", view=None)
+                        return await self.game_view.original_inter.edit_original_response(
+                            content=f"🏆 **UNO !** {self.user.mention} a posé sa dernière carte et gagne la partie (+500€) !", 
+                            embed=None, view=None
+                        )
+
+                    await i.response.edit_message(content=f"✅ Tu as joué {carte['c']} {carte['v']}", view=None)
+                    await self.game_view.maj_affichage(self.game_view.original_inter, texte=f"🔥 {self.user.display_name} a joué {carte['c']} {carte['v']} ! {effet_msg}")
+                else:
+                    await i.response.send_message("❌ Cette carte ne peut pas être jouée sur un " + f"{last['c']} {last['v']}", ephemeral=True)
+
+        # --- 6. LANCEMENT DU LOBBY ---
+        view = UnoLobby(self, interaction.user)
+        await interaction.response.send_message(embed=discord.Embed(title="🃏 SALON UNO", description="En attente de joueurs..."), view=view)
+        view.message = await interaction.original_response()
+        # On sauvegarde l'interaction originale pour les mises à jour
+        view.original_inter = interaction
+
