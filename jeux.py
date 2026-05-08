@@ -1288,3 +1288,5 @@ class Jeux(commands.Cog):
         # On sauvegarde l'interaction originale pour les mises à jour
         view.original_inter = interaction
 
+async def setup(bot):
+    await bot.add_cog(Jeux(bot))
